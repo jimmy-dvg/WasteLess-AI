@@ -4,7 +4,16 @@ import { NextResponse } from "next/server";
 const ANALYZE_PROMPT =
 	"Identify all food items in this image. For each item, provide its name, a category (Vegetables, Dairy, Meat, Pantry, or Other), and estimated shelfLifeDays as a number. Return the result strictly as a JSON array.";
 
-const MODEL_CANDIDATES = ["gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-2.0-flash"];
+const DEFAULT_FREE_TIER_MODELS = [
+	"gemini-2.5-flash",
+	"gemini-2.5-flash-latest",
+	"gemini-2.0-flash",
+	"gemini-2.0-flash-lite",
+	"gemini-1.5-flash-latest",
+	"gemini-1.5-flash",
+	"gemini-1.5-flash-8b-latest",
+	"gemini-1.5-flash-8b",
+];
 
 const DEV_FALLBACK_ITEMS = [
 	{ name: "Tomatoes", category: "Vegetables", shelfLifeDays: 5 },
@@ -85,6 +94,24 @@ function extractRetryAfterSeconds(error: unknown): number | null {
 	return null;
 }
 
+function getModelCandidates(): string[] {
+	const rawModels = process.env.GEMINI_MODELS;
+	if (!rawModels || rawModels.trim().length === 0) {
+		return DEFAULT_FREE_TIER_MODELS;
+	}
+
+	const parsed = rawModels
+		.split(",")
+		.map((model) => model.trim())
+		.filter((model) => model.length > 0);
+
+	if (parsed.length === 0) {
+		return DEFAULT_FREE_TIER_MODELS;
+	}
+
+	return Array.from(new Set(parsed));
+}
+
 export async function POST(request: Request) {
 	try {
 		const apiKey = process.env.GEMINI_API_KEY;
@@ -107,11 +134,13 @@ export async function POST(request: Request) {
 
 		const genAI = new GoogleGenerativeAI(apiKey);
 		const { mimeType, data } = normalizeBase64Image(imageBase64.trim());
+		const modelCandidates = getModelCandidates();
 
 		let responseText = "";
+		let selectedModel = "";
 		let lastError: unknown;
 
-		for (const modelName of MODEL_CANDIDATES) {
+		for (const modelName of modelCandidates) {
 			try {
 				const model = genAI.getGenerativeModel({ model: modelName });
 				const result = await model.generateContent([
@@ -129,6 +158,8 @@ export async function POST(request: Request) {
 					throw new Error(`Gemini model ${modelName} returned an empty response.`);
 				}
 
+				selectedModel = modelName;
+
 				break;
 			} catch (error) {
 				lastError = error;
@@ -144,7 +175,11 @@ export async function POST(request: Request) {
 		}
 
 		const items = parseJsonArray(responseText);
-		return NextResponse.json(items);
+		return NextResponse.json(items, {
+			headers: {
+				"x-gemini-model": selectedModel,
+			},
+		});
 	} catch (error) {
 		console.error("Analyze API error:", error);
 
