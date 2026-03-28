@@ -112,6 +112,31 @@ export default function ScanPage() {
 				}));
 
 			setDetectedItems(normalized);
+
+			const saveResponse = await fetch("/api/pantry", {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify(normalized),
+			});
+
+			if (!saveResponse.ok) {
+				const saveError: unknown = await saveResponse.json().catch(() => null);
+				const saveDetails =
+					typeof saveError === "object" && saveError !== null && "details" in saveError
+						? String((saveError as { details?: string }).details ?? "")
+						: "";
+
+				setInfoMessage(
+					saveDetails
+						? `AI analysis finished, but database save failed: ${saveDetails}`
+						: "AI analysis finished, but database save failed."
+				);
+			} else if (!usedFallback) {
+				setInfoMessage("Saved detected items to your pantry database.");
+			}
+
 			if (usedFallback) {
 				setInfoMessage(
 					"Showing sample results because Gemini quota is exceeded. Enable billing to get real AI analysis."
