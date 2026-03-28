@@ -20,9 +20,12 @@ npm install
 ```bash
 GEMINI_API_KEY=your_key_here
 GEMINI_MODELS=gemini-2.5-flash,gemini-2.5-flash-latest,gemini-2.0-flash,gemini-2.0-flash-lite,gemini-1.5-flash-latest,gemini-1.5-flash,gemini-1.5-flash-8b-latest,gemini-1.5-flash-8b
+DATABASE_URL=postgres://user:password@host:5432/database
 ```
 
 `GEMINI_MODELS` is optional. If omitted, the app uses the same built-in fallback list above.
+
+`DATABASE_URL` is required for code that uses `src/lib/db.ts`.
 
 3. Start dev server:
 
