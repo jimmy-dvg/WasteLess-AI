@@ -42,6 +42,21 @@ npm run dev
 - `npm run start` - Start production build
 - `npm run lint` - Run ESLint
 
+## PWA Support
+
+This project is configured as a Progressive Web App (PWA):
+
+- Web manifest is generated from `src/app/manifest.ts`
+- App icons are generated from `src/app/icon.tsx` and `src/app/apple-icon.tsx`
+- Service worker is served from `public/sw.js` and registered by `components/PwaRegister.tsx`
+
+To install on mobile:
+
+- Open the site in Chrome/Edge (Android) and choose **Add to Home screen**
+- Open the site in Safari (iOS), tap **Share**, then **Add to Home Screen**
+
+For install prompts and offline caching to work correctly, deploy over HTTPS.
+
 ## Core Paths
 
 - `src/app/page.tsx` - Home screen
