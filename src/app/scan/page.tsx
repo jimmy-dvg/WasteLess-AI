@@ -14,6 +14,27 @@ type DetectedFoodItem = {
 	shelfLifeDays: number;
 };
 
+type SupabaseLikeError = {
+	message?: string;
+	code?: string;
+};
+
+function isMissingUserIdColumnError(error: unknown): boolean {
+	if (typeof error !== "object" || error === null) {
+		return false;
+	}
+
+	const code = String((error as SupabaseLikeError).code ?? "");
+	const message = String((error as SupabaseLikeError).message ?? "");
+
+	return (
+		code === "42703" ||
+		message.includes("column pantry_items.user_id does not exist") ||
+		message.includes("column \"user_id\" does not exist") ||
+		message.includes("Could not find the 'user_id' column of 'pantry_items' in the schema cache")
+	);
+}
+
 function fileToBase64(file: File): Promise<string> {
 	return new Promise((resolve, reject) => {
 		const reader = new FileReader();
@@ -83,7 +104,8 @@ export default function ScanPage() {
 				body: JSON.stringify({ imageBase64 }),
 			});
 
-			const usedFallback = response.headers.get("x-analysis-fallback") === "quota";
+			const fallbackType = response.headers.get("x-analysis-fallback");
+			const usedFallback = Boolean(fallbackType);
 
 			const data: unknown = await response.json();
 
@@ -126,35 +148,57 @@ export default function ScanPage() {
 				throw new Error("Please log in to save scanned food items.");
 			}
 
-			const saveResponse = await fetch("/api/pantry", {
-				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-					Authorization: `Bearer ${session.access_token}`,
-				},
-				body: JSON.stringify(normalized),
-			});
+			let infoText: string | null = null;
 
-			if (!saveResponse.ok) {
-				const saveError: unknown = await saveResponse.json().catch(() => null);
+			const insertWithUserId = normalized.map((item) => ({
+				name: item.name,
+				category: item.category,
+				shelf_life_days: item.shelfLifeDays,
+				user_id: session.user.id,
+			}));
+
+			let saveError: unknown = null;
+			let saveResult = await supabase.from("pantry_items").insert(insertWithUserId);
+
+			if (saveResult.error && isMissingUserIdColumnError(saveResult.error)) {
+				const insertWithoutUserId = normalized.map((item) => ({
+					name: item.name,
+					category: item.category,
+					shelf_life_days: item.shelfLifeDays,
+				}));
+
+				saveResult = await supabase.from("pantry_items").insert(insertWithoutUserId);
+			}
+
+			saveError = saveResult.error;
+
+			if (saveError) {
 				const saveDetails =
-					typeof saveError === "object" && saveError !== null && "details" in saveError
-						? String((saveError as { details?: string }).details ?? "")
+					typeof saveError === "object" && saveError !== null && "message" in saveError
+						? String((saveError as { message?: string }).message ?? "")
 						: "";
 
-				setInfoMessage(
+				infoText =
 					saveDetails
 						? `AI analysis finished, but database save failed: ${saveDetails}`
-						: "AI analysis finished, but database save failed."
-				);
+						: "AI analysis finished, but database save failed.";
 			} else if (!usedFallback) {
-				setInfoMessage("Saved detected items to your pantry database.");
+				infoText = "Saved detected items to your pantry database.";
 			}
 
 			if (usedFallback) {
-				setInfoMessage(
-					"Showing sample results because Gemini quota is exceeded. Enable billing to get real AI analysis."
-				);
+				const fallbackMessage =
+					fallbackType === "quota"
+						? "Showing sample results because Gemini quota is exceeded."
+						: fallbackType === "image"
+							? "Showing sample results because the image could not be processed reliably."
+							: "Showing sample results because AI analysis is temporarily unavailable.";
+
+				infoText = infoText ? `${infoText} ${fallbackMessage}` : fallbackMessage;
+			}
+
+			if (infoText) {
+				setInfoMessage(infoText);
 			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : "Unable to process image.";

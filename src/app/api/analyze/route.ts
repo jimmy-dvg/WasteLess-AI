@@ -6,13 +6,12 @@ const ANALYZE_PROMPT =
 
 const DEFAULT_FREE_TIER_MODELS = [
 	"gemini-2.5-flash",
-	"gemini-2.5-flash-latest",
 	"gemini-2.0-flash",
+	"gemini-2.0-flash-001",
 	"gemini-2.0-flash-lite",
-	"gemini-1.5-flash-latest",
-	"gemini-1.5-flash",
-	"gemini-1.5-flash-8b-latest",
-	"gemini-1.5-flash-8b",
+	"gemini-2.0-flash-lite-001",
+	"gemini-flash-latest",
+	"gemini-flash-lite-latest",
 ];
 
 const DEV_FALLBACK_ITEMS = [
@@ -67,6 +66,35 @@ function normalizeBase64Image(imageBase64: string): { mimeType: string; data: st
 	};
 }
 
+function normalizeAnalyzedItems(items: unknown[]): Array<{ name: string; category: string; shelfLifeDays: number }> {
+	const normalized = items
+		.filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
+		.map((item) => {
+			const shelfLifeRaw =
+				item.shelfLifeDays ??
+				item.estimatedShelfLifeDays ??
+				item.shelf_life_days ??
+				item.shelf_life;
+
+			const parsedShelfLife = Number(shelfLifeRaw ?? 0);
+
+			return {
+				name: String(item.name ?? item.item ?? "").trim(),
+				category: String(item.category ?? "Other").trim() || "Other",
+				shelfLifeDays: Number.isFinite(parsedShelfLife)
+					? Math.max(0, Math.round(parsedShelfLife))
+					: 0,
+			};
+		})
+		.filter((item) => item.name.length > 0);
+
+	if (normalized.length === 0) {
+		throw new Error("Gemini response did not contain valid food items.");
+	}
+
+	return normalized;
+}
+
 function isGeminiQuotaError(error: unknown): boolean {
 	if (!(error instanceof Error)) {
 		return false;
@@ -88,6 +116,15 @@ function isGeminiModelNotFoundError(error: unknown): boolean {
 	);
 }
 
+function isGeminiInvalidImageError(error: unknown): boolean {
+	if (!(error instanceof Error)) {
+		return false;
+	}
+
+	const message = error.message.toLowerCase();
+	return message.includes("unable to process input image");
+}
+
 function extractRetryAfterSeconds(error: unknown): number | null {
 	if (!(error instanceof Error)) {
 		return null;
@@ -107,7 +144,7 @@ function extractRetryAfterSeconds(error: unknown): number | null {
 }
 
 function getModelCandidates(): string[] {
-	const rawModels = process.env.GEMINI_MODELS;
+	const rawModels = process.env.ANALYZE_GEMINI_MODELS || process.env.GEMINI_MODELS;
 	if (!rawModels || rawModels.trim().length === 0) {
 		return DEFAULT_FREE_TIER_MODELS;
 	}
@@ -151,6 +188,7 @@ export async function POST(request: Request) {
 		let responseText = "";
 		let selectedModel = "";
 		let lastError: unknown;
+		const attemptErrors: string[] = [];
 
 		for (const modelName of modelCandidates) {
 			try {
@@ -175,18 +213,22 @@ export async function POST(request: Request) {
 				break;
 			} catch (error) {
 				lastError = error;
+				if (error instanceof Error) {
+					attemptErrors.push(`${modelName}: ${error.message}`);
+				}
 			}
 		}
 
 		if (!responseText) {
 			if (lastError instanceof Error) {
-				throw lastError;
+				const details = attemptErrors.length > 0 ? ` Tried models: ${attemptErrors.join(" | ")}` : "";
+				throw new Error(`${lastError.message}${details}`);
 			}
 
 			throw new Error("Gemini returned an empty response.");
 		}
 
-		const items = parseJsonArray(responseText);
+		const items = normalizeAnalyzedItems(parseJsonArray(responseText));
 		return NextResponse.json(items, {
 			headers: {
 				"x-gemini-model": selectedModel,
@@ -219,20 +261,19 @@ export async function POST(request: Request) {
 			);
 		}
 
-		if (allowFallback && isGeminiModelNotFoundError(error)) {
+		if (allowFallback && isGeminiInvalidImageError(error)) {
 			return NextResponse.json(DEV_FALLBACK_ITEMS, {
 				headers: {
-					"x-analysis-fallback": "model",
+					"x-analysis-fallback": "image",
 				},
 			});
 		}
 
-		if (allowFallback && error instanceof Error) {
-			return NextResponse.json(DEV_FALLBACK_ITEMS, {
-				headers: {
-					"x-analysis-fallback": "error",
-				},
-			});
+		if (isGeminiModelNotFoundError(error)) {
+			return NextResponse.json(
+				{ error: "Failed to analyze image.", details: "Configured Gemini model was not found." },
+				{ status: 500 }
+			);
 		}
 
 		const details = error instanceof Error ? error.message : "Unknown error.";

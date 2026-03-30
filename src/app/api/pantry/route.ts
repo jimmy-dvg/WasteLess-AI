@@ -1,5 +1,5 @@
-import { getSupabaseServerClient } from "@/src/lib/supabase-server";
-import type { Tables, TablesInsert } from "@/src/types/supabase";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { Database, Tables, TablesInsert } from "@/src/types/supabase";
 import { NextResponse } from "next/server";
 
 type PantryItemPayload = {
@@ -11,6 +11,7 @@ type PantryItemPayload = {
 type PantryRow = Tables<"pantry_items">;
 type PantryInsert = TablesInsert<"pantry_items">;
 type PantryInsertWithUser = PantryInsert & { user_id: string };
+type UserSupabaseClient = SupabaseClient<Database>;
 
 type SupabaseLikeError = {
 	message?: string;
@@ -35,6 +36,52 @@ function getBearerToken(request: Request): string | null {
 	}
 
 	return token;
+}
+
+function getSupabaseUserClient(token: string): UserSupabaseClient {
+	const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+	const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY;
+
+	if (!url) {
+		throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL environment variable.");
+	}
+
+	if (!publishableKey) {
+		throw new Error("Missing NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY environment variable.");
+	}
+
+	return createClient<Database>(url, publishableKey, {
+		auth: {
+			persistSession: false,
+			autoRefreshToken: false,
+		},
+		global: {
+			headers: {
+				Authorization: `Bearer ${token}`,
+			},
+		},
+	});
+}
+
+async function getAuthenticatedContext(
+	request: Request
+): Promise<{ supabase: UserSupabaseClient; userId: string } | NextResponse> {
+	const token = getBearerToken(request);
+	if (!token) {
+		return redirectToLogin(request);
+	}
+
+	const supabase = getSupabaseUserClient(token);
+	const {
+		data: { user },
+		error: userError,
+	} = await supabase.auth.getUser();
+
+	if (userError || !user) {
+		return redirectToLogin(request);
+	}
+
+	return { supabase, userId: user.id };
 }
 
 function toErrorMessage(error: unknown, fallback = "Unknown database error."): string {
@@ -100,25 +147,17 @@ function normalizePayload(payload: unknown): PantryItemPayload[] {
 
 export async function GET(request: Request) {
 	try {
-		const supabase = getSupabaseServerClient();
-		const token = getBearerToken(request);
-		if (!token) {
-			return redirectToLogin(request);
+		const context = await getAuthenticatedContext(request);
+		if (context instanceof NextResponse) {
+			return context;
 		}
 
-		const {
-			data: { user },
-			error: userError,
-		} = await supabase.auth.getUser(token);
-
-		if (userError || !user) {
-			return redirectToLogin(request);
-		}
+		const { supabase, userId } = context;
 
 		const { data, error } = await supabase
 			.from("pantry_items")
 			.select("id, name, category, shelf_life_days, created_at")
-			.eq("user_id", user.id)
+			.eq("user_id", userId)
 			.order("created_at", { ascending: false })
 			.limit(50);
 
@@ -171,20 +210,12 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
 	try {
-		const supabase = getSupabaseServerClient();
-		const token = getBearerToken(request);
-		if (!token) {
-			return redirectToLogin(request);
+		const context = await getAuthenticatedContext(request);
+		if (context instanceof NextResponse) {
+			return context;
 		}
 
-		const {
-			data: { user },
-			error: userError,
-		} = await supabase.auth.getUser(token);
-
-		if (userError || !user) {
-			return redirectToLogin(request);
-		}
+		const { supabase, userId } = context;
 
 		const payload: unknown = await request.json();
 		const items = normalizePayload(payload);
@@ -193,7 +224,7 @@ export async function POST(request: Request) {
 			name: item.name,
 			category: item.category,
 			shelf_life_days: item.shelfLifeDays,
-			user_id: user.id,
+			user_id: userId,
 		}));
 
 		const { data, error } = await supabase
