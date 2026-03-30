@@ -1,16 +1,29 @@
 "use client";
 
 import BottomNav from "@/components/BottomNav";
+import { createClient } from "@supabase/supabase-js";
 import { AnimatePresence, motion } from "framer-motion";
 import { Camera } from "lucide-react";
 import Image from "next/image";
-import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type DetectedFoodItem = {
 	name: string;
 	category: string;
 	shelfLifeDays: number;
 };
+
+function getSupabaseBrowserClient() {
+	const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+	const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY;
+
+	if (!url || !publishableKey) {
+		throw new Error("Missing Supabase public environment variables.");
+	}
+
+	return createClient(url, publishableKey);
+}
 
 function fileToBase64(file: File): Promise<string> {
 	return new Promise((resolve, reject) => {
@@ -29,6 +42,8 @@ function fileToBase64(file: File): Promise<string> {
 }
 
 export default function ScanPage() {
+	const router = useRouter();
+	const supabase = useMemo(() => getSupabaseBrowserClient(), []);
 	const [selectedFile, setSelectedFile] = useState<File | null>(null);
 	const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 	const [detectedItems, setDetectedItems] = useState<DetectedFoodItem[]>([]);
@@ -113,10 +128,20 @@ export default function ScanPage() {
 
 			setDetectedItems(normalized);
 
+			const {
+				data: { session },
+			} = await supabase.auth.getSession();
+
+			if (!session?.access_token) {
+				router.push("/login");
+				throw new Error("Please log in to save scanned food items.");
+			}
+
 			const saveResponse = await fetch("/api/pantry", {
 				method: "POST",
 				headers: {
 					"Content-Type": "application/json",
+					Authorization: `Bearer ${session.access_token}`,
 				},
 				body: JSON.stringify(normalized),
 			});

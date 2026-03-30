@@ -10,6 +10,25 @@ type PantryItemPayload = {
 
 type PantryRow = Tables<"pantry_items">;
 type PantryInsert = TablesInsert<"pantry_items">;
+type PantryInsertWithUser = PantryInsert & { user_id: string };
+
+function redirectToLogin(request: Request): NextResponse {
+	return NextResponse.redirect(new URL("/login", request.url));
+}
+
+function getBearerToken(request: Request): string | null {
+	const header = request.headers.get("authorization");
+	if (!header) {
+		return null;
+	}
+
+	const [scheme, token] = header.split(" ");
+	if (scheme?.toLowerCase() !== "bearer" || !token) {
+		return null;
+	}
+
+	return token;
+}
 
 function normalizePayload(payload: unknown): PantryItemPayload[] {
 	if (!Array.isArray(payload)) {
@@ -38,12 +57,27 @@ function normalizePayload(payload: unknown): PantryItemPayload[] {
 	return normalized;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
 	try {
 		const supabase = getSupabaseServerClient();
+		const token = getBearerToken(request);
+		if (!token) {
+			return redirectToLogin(request);
+		}
+
+		const {
+			data: { user },
+			error: userError,
+		} = await supabase.auth.getUser(token);
+
+		if (userError || !user) {
+			return redirectToLogin(request);
+		}
+
 		const { data, error } = await supabase
 			.from("pantry_items")
 			.select("id, name, category, shelf_life_days, created_at")
+			.eq("user_id", user.id)
 			.order("created_at", { ascending: false })
 			.limit(50);
 
@@ -73,14 +107,29 @@ export async function GET() {
 
 export async function POST(request: Request) {
 	try {
+		const supabase = getSupabaseServerClient();
+		const token = getBearerToken(request);
+		if (!token) {
+			return redirectToLogin(request);
+		}
+
+		const {
+			data: { user },
+			error: userError,
+		} = await supabase.auth.getUser(token);
+
+		if (userError || !user) {
+			return redirectToLogin(request);
+		}
+
 		const payload: unknown = await request.json();
 		const items = normalizePayload(payload);
-		const supabase = getSupabaseServerClient();
 
-		const insertRows: PantryInsert[] = items.map((item) => ({
+		const insertRows: PantryInsertWithUser[] = items.map((item) => ({
 			name: item.name,
 			category: item.category,
 			shelf_life_days: item.shelfLifeDays,
+			user_id: user.id,
 		}));
 
 		const { data, error } = await supabase

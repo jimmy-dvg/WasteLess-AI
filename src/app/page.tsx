@@ -4,6 +4,7 @@ import BottomNav from "@/components/BottomNav";
 import { createClient } from "@supabase/supabase-js";
 import { ChefHat, Clock3, ScanLine, Sparkles } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 type DashboardItem = {
@@ -155,8 +156,12 @@ async function loadDashboardItems(): Promise<DashboardItem[]> {
 }
 
 export default function Home() {
+	const router = useRouter();
+	const supabase = useMemo(() => getSupabaseBrowserClient(), []);
 	const [items, setItems] = useState<DashboardItem[]>([]);
 	const [isLoading, setIsLoading] = useState(true);
+	const [isAuthLoading, setIsAuthLoading] = useState(true);
+	const [isAuthenticated, setIsAuthenticated] = useState(false);
 	const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
 	useEffect(() => {
@@ -176,6 +181,34 @@ export default function Home() {
 
 		void fetchItems();
 	}, []);
+
+	useEffect(() => {
+		const syncAuthState = async () => {
+			const {
+				data: { session },
+			} = await supabase.auth.getSession();
+			setIsAuthenticated(Boolean(session?.user));
+			setIsAuthLoading(false);
+		};
+
+		void syncAuthState();
+
+		const {
+			data: { subscription },
+		} = supabase.auth.onAuthStateChange((_event, session) => {
+			setIsAuthenticated(Boolean(session?.user));
+		});
+
+		return () => {
+			subscription.unsubscribe();
+		};
+	}, [supabase]);
+
+	const handleLogout = async () => {
+		await supabase.auth.signOut();
+		router.push("/login");
+		router.refresh();
+	};
 
 	const totalItems = items.length;
 	const expiringSoonCount = useMemo(
@@ -214,7 +247,27 @@ export default function Home() {
 		<main className="min-h-screen bg-[#f5f6f8] px-4 py-8 pb-28">
 			<div className="mx-auto w-full max-w-sm space-y-6">
 				<section className="rounded-3xl border border-slate-100 bg-white px-5 py-6 shadow-[0_16px_38px_-24px_rgba(15,23,42,0.35)]">
-					<p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Dashboard</p>
+					<div className="flex items-start justify-between gap-3">
+						<p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Dashboard</p>
+						{isAuthLoading ? (
+							<span className="text-xs text-slate-400">Checking auth...</span>
+						) : isAuthenticated ? (
+							<button
+								type="button"
+								onClick={() => void handleLogout()}
+								className="rounded-xl border border-slate-200 bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-200"
+							>
+								Logout
+							</button>
+						) : (
+							<Link
+								href="/login"
+								className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100"
+							>
+								Login
+							</Link>
+						)}
+					</div>
 					<h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">Kitchen Status</h1>
 
 					<div className="mt-5 grid grid-cols-2 gap-3">
