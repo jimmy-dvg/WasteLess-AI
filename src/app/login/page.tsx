@@ -1,22 +1,11 @@
 "use client";
 
-import { createClient } from "@supabase/supabase-js";
+import { getSupabaseBrowserClient } from "@/src/lib/supabase-browser";
 import { ArrowRight, Sparkles } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { FormEvent, useMemo, useState } from "react";
 
 type AuthMode = "login" | "signup";
-
-function getSupabaseBrowserClient() {
-	const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-	const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY;
-
-	if (!url || !publishableKey) {
-		throw new Error("Missing Supabase public environment variables.");
-	}
-
-	return createClient(url, publishableKey);
-}
 
 export default function LoginPage() {
 	const router = useRouter();

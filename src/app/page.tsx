@@ -1,7 +1,7 @@
 "use client";
 
 import BottomNav from "@/components/BottomNav";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabaseBrowserClient } from "@/src/lib/supabase-browser";
 import { ChefHat, Clock3, ScanLine, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -16,17 +16,6 @@ type DashboardItem = {
 
 const TWO_DAYS_IN_MS = 48 * 60 * 60 * 1000;
 
-function getSupabaseBrowserClient() {
-	const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-	const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY;
-
-	if (!url || !publishableKey) {
-		throw new Error("Missing Supabase public environment variables.");
-	}
-
-	return createClient(url, publishableKey);
-}
-
 function addDays(dateInput: string, days: number): string | null {
 	const date = new Date(dateInput);
 	if (Number.isNaN(date.getTime())) {
@@ -35,21 +24,6 @@ function addDays(dateInput: string, days: number): string | null {
 
 	date.setDate(date.getDate() + days);
 	return date.toISOString();
-}
-
-function isMissingFoodItemsTableError(error: unknown): boolean {
-	if (typeof error !== "object" || error === null) {
-		return false;
-	}
-
-	const code = "code" in error ? String((error as { code?: string }).code ?? "") : "";
-	const message = "message" in error ? String((error as { message?: string }).message ?? "") : "";
-
-	return (
-		code === "42P01" ||
-		code === "PGRST205" ||
-		message.includes("Could not find the table 'public.food_items'")
-	);
 }
 
 function getTimeToExpiryMs(expiryDate: string | null): number | null {
@@ -87,29 +61,6 @@ function formatUrgencyLabel(expiryDate: string | null): string {
 
 async function loadDashboardItems(): Promise<DashboardItem[]> {
 	const supabase = getSupabaseBrowserClient();
-	const foodItemsResponse = await supabase
-		.from("food_items")
-		.select("id, name, quantity, expiry_date")
-		.order("expiry_date", { ascending: true, nullsFirst: false });
-
-	if (!foodItemsResponse.error) {
-		const items = Array.isArray(foodItemsResponse.data) ? foodItemsResponse.data : [];
-		return items
-			.filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
-			.map((item) => ({
-				id: String(item.id ?? ""),
-				name: String(item.name ?? "").trim(),
-				quantity:
-					typeof item.quantity === "number" && Number.isFinite(item.quantity) ? item.quantity : null,
-				expiryDate: item.expiry_date ? String(item.expiry_date) : null,
-			}))
-			.filter((item) => item.id.length > 0 && item.name.length > 0);
-	}
-
-	if (!isMissingFoodItemsTableError(foodItemsResponse.error)) {
-		throw foodItemsResponse.error;
-	}
-
 	const pantryResponse = await supabase
 		.from("pantry_items")
 		.select("id, name, shelf_life_days, created_at")

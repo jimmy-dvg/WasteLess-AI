@@ -76,6 +76,18 @@ function isGeminiQuotaError(error: unknown): boolean {
 	return message.includes("429") || message.includes("quota") || message.includes("too many requests");
 }
 
+function isGeminiModelNotFoundError(error: unknown): boolean {
+	if (!(error instanceof Error)) {
+		return false;
+	}
+
+	const message = error.message.toLowerCase();
+	return (
+		message.includes("not found for api version") ||
+		(message.includes("models/") && message.includes("not found"))
+	);
+}
+
 function extractRetryAfterSeconds(error: unknown): number | null {
 	if (!(error instanceof Error)) {
 		return null;
@@ -109,7 +121,7 @@ function getModelCandidates(): string[] {
 		return DEFAULT_FREE_TIER_MODELS;
 	}
 
-	return Array.from(new Set(parsed));
+	return Array.from(new Set([...parsed, ...DEFAULT_FREE_TIER_MODELS]));
 }
 
 export async function POST(request: Request) {
@@ -183,10 +195,10 @@ export async function POST(request: Request) {
 	} catch (error) {
 		console.error("Analyze API error:", error);
 
-		if (isGeminiQuotaError(error)) {
-			const allowFallback =
-				process.env.ALLOW_QUOTA_FALLBACK === "true" || process.env.NODE_ENV !== "production";
+		const allowFallback =
+			process.env.ALLOW_QUOTA_FALLBACK === "true" || process.env.NODE_ENV !== "production";
 
+		if (isGeminiQuotaError(error)) {
 			if (allowFallback) {
 				return NextResponse.json(DEV_FALLBACK_ITEMS, {
 					headers: {
@@ -205,6 +217,22 @@ export async function POST(request: Request) {
 				{ error: "Failed to analyze image.", details: message },
 				{ status: 429 }
 			);
+		}
+
+		if (allowFallback && isGeminiModelNotFoundError(error)) {
+			return NextResponse.json(DEV_FALLBACK_ITEMS, {
+				headers: {
+					"x-analysis-fallback": "model",
+				},
+			});
+		}
+
+		if (allowFallback && error instanceof Error) {
+			return NextResponse.json(DEV_FALLBACK_ITEMS, {
+				headers: {
+					"x-analysis-fallback": "error",
+				},
+			});
 		}
 
 		const details = error instanceof Error ? error.message : "Unknown error.";

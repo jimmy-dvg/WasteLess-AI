@@ -1,7 +1,7 @@
 "use client";
 
 import BottomNav from "@/components/BottomNav";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabaseBrowserClient } from "@/src/lib/supabase-browser";
 import {
 	AlertTriangle,
 	CalendarDays,
@@ -21,17 +21,6 @@ type FoodItem = {
 };
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
-
-function getSupabaseBrowserClient() {
-	const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-	const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY;
-
-	if (!url || !publishableKey) {
-		throw new Error("Missing Supabase public environment variables.");
-	}
-
-	return createClient(url, publishableKey);
-}
 
 function startOfToday(): Date {
 	const now = new Date();
