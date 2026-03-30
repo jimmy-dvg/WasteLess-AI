@@ -8,18 +8,18 @@ type TabKey = "home" | "scan" | "inventory" | "recipes";
 
 const tabs = [
 	{ key: "home" as const, label: "Home", href: "/", icon: Home },
-	{ key: "scan" as const, label: "Scan", href: "/scan", icon: ScanLine },
 	{ key: "inventory" as const, label: "Inventory", href: "/inventory", icon: Refrigerator },
+	{ key: "scan" as const, label: "Scan", href: "/scan", icon: ScanLine },
 	{ key: "recipes" as const, label: "Recipes", href: "/recipes", icon: UtensilsCrossed },
 ];
 
 export default function BottomNav() {
 	const pathname = usePathname();
 
-	const activeTab: TabKey = pathname.startsWith("/scan")
-		? "scan"
-		: pathname.startsWith("/inventory")
+	const activeTab: TabKey = pathname.startsWith("/inventory")
 			? "inventory"
+		: pathname.startsWith("/scan")
+			? "scan"
 		: pathname.startsWith("/recipes")
 			? "recipes"
 			: "home";
@@ -38,7 +38,7 @@ export default function BottomNav() {
 									href={tab.href}
 									className={`flex w-full flex-col items-center justify-center rounded-2xl px-3 py-2 text-xs font-medium transition ${
 										isActive
-											? "bg-green-100/90 text-green-700"
+											? "bg-green-100/90 text-green-600"
 											: "text-slate-600 hover:bg-white/60 hover:text-slate-800"
 									}`}
 								>
