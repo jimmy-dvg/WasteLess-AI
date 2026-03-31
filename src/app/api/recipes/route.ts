@@ -7,10 +7,37 @@ type FoodItemInput = {
 	quantity: string;
 };
 
+type RecipeIngredientOutput = {
+	name: string;
+	amount: number;
+	unit: string;
+};
+
+type RecipeNutritionOutput = {
+	calories: number;
+	protein: number;
+	carbs: number;
+	fat: number;
+};
+
+type RecipeStepOutput = {
+	title: string;
+	instruction: string;
+	timerMinutes: number;
+	visualHint: string;
+	videoHint: string;
+};
+
 type RecipeOutput = {
 	title: string;
 	description: string;
-	steps: string[];
+	prepTimeMinutes: number;
+	difficulty: "Easy" | "Medium" | "Hard";
+	servings: number;
+	tags: string[];
+	nutrition: RecipeNutritionOutput;
+	ingredients: RecipeIngredientOutput[];
+	steps: RecipeStepOutput[];
 };
 
 const DEFAULT_RECIPE_MODELS = [
@@ -106,7 +133,185 @@ function normalizeFoodItems(payload: unknown): FoodItemInput[] {
 function buildPrompt(items: FoodItemInput[]): string {
 	const list = items.map((item) => `${item.name} (${item.quantity})`).join(", ");
 
-	return `I have these ingredients: ${list}. Suggest 3 recipes. For each, provide a title, a short description, and a list of steps. Return the response strictly as a JSON array of objects. Use only these ingredients plus common basics like salt, pepper, water, and oil.`;
+	return `I have these ingredients: ${list}. Suggest 3 recipes.
+
+Return ONLY a JSON array of recipe objects with this exact structure:
+[
+  {
+    "title": "string",
+    "description": "string",
+    "prepTimeMinutes": 25,
+    "difficulty": "Easy|Medium|Hard",
+    "servings": 2,
+    "tags": ["quick dinner", "high protein"],
+    "nutrition": {
+      "calories": 520,
+      "protein": 28,
+      "carbs": 54,
+      "fat": 18
+    },
+    "ingredients": [
+      { "name": "ingredient", "amount": 2, "unit": "pcs" }
+    ],
+    "steps": [
+      {
+        "title": "Step title",
+        "instruction": "clear instruction",
+        "timerMinutes": 8,
+        "visualHint": "short visual cue for this step",
+        "videoHint": "short optional video cue"
+      }
+    ]
+  }
+]
+
+Rules:
+- Use only the provided ingredients plus common basics: salt, pepper, water, oil.
+- Keep each recipe practical for home cooking.
+- Provide 4-8 ingredients and 4-8 steps per recipe.
+- Keep nutrition values realistic and as integers.
+- Keep tags short and useful (e.g. vegan, gluten-free, quick dinner).
+- Do not include markdown, explanations, or code fences.`;
+}
+
+function normalizeNumber(value: unknown, fallback: number, max = 9999): number {
+	const parsed = Number(value);
+	if (!Number.isFinite(parsed)) {
+		return fallback;
+	}
+
+	return Math.max(0, Math.min(max, Math.round(parsed)));
+}
+
+function normalizeDifficulty(value: unknown): "Easy" | "Medium" | "Hard" {
+	const raw = String(value ?? "").trim().toLowerCase();
+
+	if (raw.includes("easy") || raw.includes("beginner")) {
+		return "Easy";
+	}
+
+	if (raw.includes("hard") || raw.includes("advanced") || raw.includes("difficult")) {
+		return "Hard";
+	}
+
+	return "Medium";
+}
+
+function normalizeTags(value: unknown): string[] {
+	if (Array.isArray(value)) {
+		return value
+			.map((tag) => String(tag ?? "").trim())
+			.filter((tag) => tag.length > 0)
+			.slice(0, 8);
+	}
+
+	if (typeof value === "string") {
+		return value
+			.split(/,|\n|;/)
+			.map((tag) => tag.trim())
+			.filter((tag) => tag.length > 0)
+			.slice(0, 8);
+	}
+
+	return [];
+}
+
+function normalizeNutrition(value: unknown): RecipeNutritionOutput {
+	const nutrition = typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
+
+	return {
+		calories: normalizeNumber(nutrition.calories ?? nutrition.kcal, 400, 2000),
+		protein: normalizeNumber(nutrition.protein ?? nutrition.protein_g, 20, 300),
+		carbs: normalizeNumber(nutrition.carbs ?? nutrition.carbohydrates ?? nutrition.carbs_g, 40, 400),
+		fat: normalizeNumber(nutrition.fat ?? nutrition.fats ?? nutrition.fat_g, 15, 250),
+	};
+}
+
+function normalizeIngredients(value: unknown): RecipeIngredientOutput[] {
+	if (!Array.isArray(value)) {
+		return [];
+	}
+
+	return value
+		.filter((ingredient): ingredient is Record<string, unknown> =>
+			typeof ingredient === "object" && ingredient !== null
+		)
+		.map((ingredient) => {
+			const name = String(ingredient.name ?? ingredient.ingredient ?? "").trim();
+			const amount = Number(ingredient.amount ?? ingredient.quantity ?? ingredient.qty ?? 0);
+			const unit = String(ingredient.unit ?? "pcs").trim() || "pcs";
+
+			return {
+				name,
+				amount: Number.isFinite(amount) ? Math.max(0, amount) : 0,
+				unit,
+			};
+		})
+		.filter((ingredient) => ingredient.name.length > 0)
+		.slice(0, 12);
+}
+
+function normalizeSteps(value: unknown): RecipeStepOutput[] {
+	if (Array.isArray(value)) {
+		return value
+			.map((step, index) => {
+				if (typeof step === "string") {
+					const instruction = step.trim();
+					return {
+						title: `Step ${index + 1}`,
+						instruction,
+						timerMinutes: 0,
+						visualHint: "",
+						videoHint: "",
+					};
+				}
+
+				if (typeof step === "object" && step !== null) {
+					const entry = step as Record<string, unknown>;
+					const instruction = String(entry.instruction ?? entry.step ?? entry.text ?? "").trim();
+					const timerMinutes = normalizeNumber(
+						entry.timerMinutes ?? entry.timer_minutes ?? entry.durationMinutes ?? entry.duration ?? 0,
+						0,
+						240
+					);
+
+					return {
+						title: String(entry.title ?? `Step ${index + 1}`).trim() || `Step ${index + 1}`,
+						instruction,
+						timerMinutes,
+						visualHint: String(entry.visualHint ?? entry.visual_hint ?? "").trim(),
+						videoHint: String(entry.videoHint ?? entry.video_hint ?? "").trim(),
+					};
+				}
+
+				return {
+					title: `Step ${index + 1}`,
+					instruction: "",
+					timerMinutes: 0,
+					visualHint: "",
+					videoHint: "",
+				};
+			})
+			.filter((step) => step.instruction.length > 0)
+			.slice(0, 10);
+	}
+
+	if (typeof value === "string") {
+		return value
+			.split(/\n|\r|\.|;/)
+			.map((line) => line.trim())
+			.filter((line) => line.length > 0)
+			.slice(0, 10)
+			.map((instruction, index) => ({
+				title: `Step ${index + 1}`,
+				instruction,
+				timerMinutes: 0,
+				visualHint: "",
+				videoHint: "",
+			}));
+	}
+
+	return [];
 }
 
 function normalizeRecipes(payload: unknown[]): RecipeOutput[] {
@@ -115,20 +320,33 @@ function normalizeRecipes(payload: unknown[]): RecipeOutput[] {
 		.map((item) => {
 			const title = String(item.title ?? "").trim();
 			const description = String(item.description ?? "").trim();
-			const rawSteps = item.steps;
+			const prepTimeMinutes = normalizeNumber(item.prepTimeMinutes ?? item.prep_time_minutes ?? 0, 25, 300);
+			const servings = Math.max(1, normalizeNumber(item.servings ?? item.portions ?? 2, 2, 20));
+			const difficulty = normalizeDifficulty(item.difficulty);
+			const tags = normalizeTags(item.tags);
+			const nutrition = normalizeNutrition(item.nutrition);
+			const ingredients = normalizeIngredients(item.ingredients);
+			const steps = normalizeSteps(item.steps);
 
-			const steps = Array.isArray(rawSteps)
-				? rawSteps.map((step) => String(step ?? "").trim()).filter((step) => step.length > 0)
-				: typeof rawSteps === "string"
-					? rawSteps
-						.split(/\n|\r|\.|;/)
-						.map((step) => step.trim())
-						.filter((step) => step.length > 0)
-					: [];
-
-			return { title, description, steps };
+			return {
+				title,
+				description,
+				prepTimeMinutes,
+				difficulty,
+				servings,
+				tags,
+				nutrition,
+				ingredients,
+				steps,
+			};
 		})
-		.filter((recipe) => recipe.title.length > 0 && recipe.description.length > 0 && recipe.steps.length > 0)
+		.filter(
+			(recipe) =>
+				recipe.title.length > 0 &&
+				recipe.description.length > 0 &&
+				recipe.steps.length > 0 &&
+				recipe.ingredients.length > 0
+		)
 		.slice(0, 3);
 
 	if (recipes.length === 0) {
