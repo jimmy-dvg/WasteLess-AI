@@ -1,16 +1,17 @@
 "use client";
 
-import { Home, Refrigerator, ScanLine, UtensilsCrossed } from "lucide-react";
+import { Home, Refrigerator, ScanLine, UserRound, UtensilsCrossed } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-type TabKey = "home" | "scan" | "inventory" | "recipes";
+type TabKey = "home" | "scan" | "inventory" | "recipes" | "profile";
 
 const tabs = [
 	{ key: "home" as const, label: "Home", href: "/", icon: Home },
 	{ key: "inventory" as const, label: "Inventory", href: "/inventory", icon: Refrigerator },
 	{ key: "scan" as const, label: "Scan", href: "/scan", icon: ScanLine },
 	{ key: "recipes" as const, label: "Recipes", href: "/recipes", icon: UtensilsCrossed },
+	{ key: "profile" as const, label: "Profile", href: "/profile", icon: UserRound },
 ];
 
 export default function BottomNav() {
@@ -22,6 +23,8 @@ export default function BottomNav() {
 			? "scan"
 		: pathname.startsWith("/recipes")
 			? "recipes"
+		: pathname.startsWith("/profile")
+			? "profile"
 			: "home";
 
 	return (

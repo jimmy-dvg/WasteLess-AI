@@ -60,6 +60,27 @@ type Recipe = {
 	steps: RecipeStep[];
 };
 
+type FavoriteRecipePayload = {
+	title: string;
+	description: string;
+	instructions: string;
+	imageUrl: string | null;
+};
+
+type CollectionCapabilities = {
+	favorites: boolean;
+	notes: boolean;
+	shopping: boolean;
+};
+
+type CollectionsApiResponse = {
+	favorites: FavoriteRecipePayload[];
+	notes: Record<string, string>;
+	shopping: ShoppingItem[];
+	capabilities: CollectionCapabilities;
+	warning?: string;
+};
+
 type ShoppingItem = {
 	name: string;
 	amount: number;
@@ -116,7 +137,6 @@ const TWO_DAYS_IN_MS = 48 * 60 * 60 * 1000;
 const FAVORITES_STORAGE_KEY = "wasteless.favorite-recipes";
 const NOTES_STORAGE_KEY = "wasteless.recipe-notes";
 const SHOPPING_STORAGE_KEY = "wasteless.shopping-list";
-const COLLECTIONS_MISSING_TABLES_ERROR = "RECIPE_COLLECTIONS_MISSING_TABLES";
 
 const VOICE_NUMBER_WORDS: Record<string, number> = {
 	zero: 0,
@@ -217,6 +237,7 @@ function isMissingRecipeCollectionsTableError(error: unknown): boolean {
 
 	return (
 		code === "42P01" ||
+		message.includes("relation \"favorite_recipes\" does not exist") ||
 		message.includes("relation \"recipe_favorites\" does not exist") ||
 		message.includes("relation \"recipe_notes\" does not exist") ||
 		message.includes("relation \"shopping_list_items\" does not exist")
@@ -405,6 +426,16 @@ function formatScaledAmount(amount: number): string {
 	return amount.toFixed(1);
 }
 
+function buildRecipeInstructions(recipe: Recipe): string {
+	return recipe.steps
+		.map((step, index) => {
+			const stepTitle = step.title.trim() || `Step ${index + 1}`;
+			return `${index + 1}. ${stepTitle}: ${step.instruction.trim()}`;
+		})
+		.join("\n")
+		.trim();
+}
+
 function getSpeechRecognitionCtor(): (new () => SpeechRecognitionLike) | null {
 	if (typeof window === "undefined") {
 		return null;
@@ -584,6 +615,10 @@ export default function RecipesPage() {
 	const [isAuthenticated, setIsAuthenticated] = useState(false);
 	const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 	const [collectionStorageMode, setCollectionStorageMode] = useState<CollectionStorageMode>("cloud");
+	const [collectionNoticeMessage, setCollectionNoticeMessage] = useState<string | null>(null);
+	const [cloudFavoritesEnabled, setCloudFavoritesEnabled] = useState(false);
+	const [cloudNotesEnabled, setCloudNotesEnabled] = useState(false);
+	const [cloudShoppingEnabled, setCloudShoppingEnabled] = useState(false);
 	const [isCollectionsReady, setIsCollectionsReady] = useState(false);
 	const [sourceItems, setSourceItems] = useState<IngredientItem[]>([]);
 	const [recipes, setRecipes] = useState<Recipe[]>([]);
@@ -593,6 +628,8 @@ export default function RecipesPage() {
 	const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
 	const [servingsMap, setServingsMap] = useState<Record<string, number>>({});
 	const [favoriteRecipes, setFavoriteRecipes] = useState<Set<string>>(new Set());
+	const [favoriteRecipePayloads, setFavoriteRecipePayloads] = useState<Record<string, FavoriteRecipePayload>>({});
+	const [favoriteToastMessage, setFavoriteToastMessage] = useState<string | null>(null);
 	const [shoppingList, setShoppingList] = useState<ShoppingItem[]>([]);
 	const [recipeNotes, setRecipeNotes] = useState<Record<string, string>>({});
 	const [assistantReplies, setAssistantReplies] = useState<Record<string, string>>({});
@@ -608,6 +645,20 @@ export default function RecipesPage() {
 	const voiceEnabledRef = useRef(false);
 	const skipCloudFavoritesSyncRef = useRef(true);
 	const skipCloudShoppingSyncRef = useRef(true);
+
+	useEffect(() => {
+		if (!favoriteToastMessage) {
+			return;
+		}
+
+		const timeoutId = window.setTimeout(() => {
+			setFavoriteToastMessage(null);
+		}, 1600);
+
+		return () => {
+			window.clearTimeout(timeoutId);
+		};
+	}, [favoriteToastMessage]);
 
 	useEffect(() => {
 		let isMounted = true;
@@ -667,10 +718,12 @@ export default function RecipesPage() {
 				const parsed = JSON.parse(favoriteRaw);
 				if (Array.isArray(parsed)) {
 					setFavoriteRecipes(new Set(parsed.map((item) => String(item))));
+					setFavoriteRecipePayloads({});
 				}
 			}
 		} catch {
 			setFavoriteRecipes(new Set());
+			setFavoriteRecipePayloads({});
 		}
 
 		try {
@@ -721,70 +774,107 @@ export default function RecipesPage() {
 
 		const loadCollections = async () => {
 			setIsCollectionsReady(false);
+			setCollectionNoticeMessage(null);
+			hydrateCollectionsFromLocalStorage();
+			setCloudFavoritesEnabled(false);
+			setCloudNotesEnabled(false);
+			setCloudShoppingEnabled(false);
+			setCollectionStorageMode("local");
 
 			try {
-				const [favoritesResponse, notesResponse, shoppingResponse] = await Promise.all([
-					supabase
-						.from("recipe_favorites")
-						.select("recipe_title, created_at")
-						.order("created_at", { ascending: false }),
-					supabase
-						.from("recipe_notes")
-						.select("recipe_title, note, updated_at")
-						.order("updated_at", { ascending: false }),
-					supabase
-						.from("shopping_list_items")
-						.select("recipe_title, name, amount, unit, created_at")
-						.order("created_at", { ascending: false }),
-				]);
+				const {
+					data: { session },
+				} = await supabase.auth.getSession();
 
-				const errors = [
-					favoritesResponse.error,
-					notesResponse.error,
-					shoppingResponse.error,
-				].filter((error): error is NonNullable<typeof error> => Boolean(error));
+				if (!session?.access_token) {
+					router.replace("/login");
+					return;
+				}
 
-				if (errors.length > 0) {
-					const hasMissingCollectionsTables = errors.some((error) =>
-						isMissingRecipeCollectionsTableError(error)
-					);
+				const response = await fetch("/api/recipes/collections", {
+					method: "GET",
+					headers: {
+						Authorization: `Bearer ${session.access_token}`,
+					},
+				});
 
-					if (hasMissingCollectionsTables) {
-						throw new Error(COLLECTIONS_MISSING_TABLES_ERROR);
-					}
+				const payload: unknown = await response.json();
 
-					throw errors[0];
+				if (!response.ok) {
+					const details =
+						typeof payload === "object" && payload !== null && "details" in payload
+							? String((payload as { details?: string }).details ?? "")
+							: "Failed to load recipe collections.";
+					throw new Error(details);
 				}
 
 				if (isCancelled) {
 					return;
 				}
 
-				setFavoriteRecipes(
-					new Set((favoritesResponse.data ?? []).map((item) => String(item.recipe_title ?? "").trim()).filter((item) => item.length > 0))
-				);
+				const collections = payload as CollectionsApiResponse;
+				const capabilities = collections.capabilities ?? {
+					favorites: false,
+					notes: false,
+					shopping: false,
+				};
 
-				setRecipeNotes(
-					Object.fromEntries(
-						(notesResponse.data ?? []).map((item) => [
-							String(item.recipe_title ?? ""),
-							String(item.note ?? ""),
-						])
-					)
-				);
+				const favoriteRows = (Array.isArray(collections.favorites) ? collections.favorites : [])
+					.map((item) => ({
+						title: String(item.title ?? "").trim(),
+						description: String(item.description ?? "").trim(),
+						instructions: String(item.instructions ?? "").trim(),
+						imageUrl: item.imageUrl ? String(item.imageUrl) : null,
+					}))
+					.filter((item) => item.title.length > 0);
 
-				setShoppingList(
-					(shoppingResponse.data ?? [])
-						.map((item) => ({
-							name: String(item.name ?? "").trim(),
-							amount: Number(item.amount ?? 0),
-							unit: String(item.unit ?? "pcs").trim() || "pcs",
-							recipeTitle: String(item.recipe_title ?? "").trim(),
-						}))
-						.filter((item) => item.name.length > 0)
-				);
+				if (capabilities.favorites) {
+					setFavoriteRecipes(new Set(favoriteRows.map((item) => item.title)));
+					setFavoriteRecipePayloads(
+						Object.fromEntries(
+							favoriteRows.map((item) => [
+								item.title,
+								{
+									title: item.title,
+									description: item.description,
+									instructions: item.instructions,
+									imageUrl: item.imageUrl,
+								} satisfies FavoriteRecipePayload,
+							])
+						)
+					);
+				}
 
-				setCollectionStorageMode("cloud");
+				if (capabilities.notes && typeof collections.notes === "object" && collections.notes !== null) {
+					const normalizedEntries = Object.entries(collections.notes).map(([key, value]) => [
+						String(key),
+						String(value ?? ""),
+					]);
+					setRecipeNotes(Object.fromEntries(normalizedEntries));
+				}
+
+				if (capabilities.shopping && Array.isArray(collections.shopping)) {
+					setShoppingList(
+						collections.shopping
+							.map((item) => ({
+								name: String(item.name ?? "").trim(),
+								amount: Number(item.amount ?? 0),
+								unit: String(item.unit ?? "pcs").trim() || "pcs",
+								recipeTitle: String(item.recipeTitle ?? "").trim(),
+							}))
+							.filter((item) => item.name.length > 0)
+					);
+				}
+
+				setCloudFavoritesEnabled(Boolean(capabilities.favorites));
+				setCloudNotesEnabled(Boolean(capabilities.notes));
+				setCloudShoppingEnabled(Boolean(capabilities.shopping));
+				setCollectionStorageMode(capabilities.favorites ? "cloud" : "local");
+				setCollectionNoticeMessage(
+					typeof collections.warning === "string" && collections.warning.trim().length > 0
+						? collections.warning.trim()
+						: null
+				);
 				skipCloudFavoritesSyncRef.current = true;
 				skipCloudShoppingSyncRef.current = true;
 			} catch (error) {
@@ -793,17 +883,14 @@ export default function RecipesPage() {
 				}
 
 				hydrateCollectionsFromLocalStorage();
+				setCloudFavoritesEnabled(false);
+				setCloudNotesEnabled(false);
+				setCloudShoppingEnabled(false);
 				setCollectionStorageMode("local");
 				skipCloudFavoritesSyncRef.current = true;
 				skipCloudShoppingSyncRef.current = true;
 
-				if (error instanceof Error && error.message === COLLECTIONS_MISSING_TABLES_ERROR) {
-					setErrorMessage(
-						"Recipe collections are currently in local mode. Apply the latest SQL migration to sync favorites, notes, and shopping list across devices."
-					);
-				} else {
-					setErrorMessage(toErrorMessage(error, "Failed to load your recipe collections."));
-				}
+				setCollectionNoticeMessage(toErrorMessage(error, "Recipe collections are in local mode."));
 			} finally {
 				if (!isCancelled) {
 					setIsCollectionsReady(true);
@@ -816,36 +903,36 @@ export default function RecipesPage() {
 		return () => {
 			isCancelled = true;
 		};
-	}, [currentUserId, hydrateCollectionsFromLocalStorage, isAuthenticated, supabase]);
+	}, [currentUserId, hydrateCollectionsFromLocalStorage, isAuthenticated, router, supabase]);
 
 	useEffect(() => {
-		if (!isCollectionsReady || collectionStorageMode !== "local") {
+		if (!isCollectionsReady || cloudFavoritesEnabled) {
 			return;
 		}
 
 		localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(Array.from(favoriteRecipes)));
-	}, [collectionStorageMode, favoriteRecipes, isCollectionsReady]);
+	}, [cloudFavoritesEnabled, favoriteRecipes, isCollectionsReady]);
 
 	useEffect(() => {
-		if (!isCollectionsReady || collectionStorageMode !== "local") {
+		if (!isCollectionsReady || cloudNotesEnabled) {
 			return;
 		}
 
 		localStorage.setItem(NOTES_STORAGE_KEY, JSON.stringify(recipeNotes));
-	}, [collectionStorageMode, isCollectionsReady, recipeNotes]);
+	}, [cloudNotesEnabled, isCollectionsReady, recipeNotes]);
 
 	useEffect(() => {
-		if (!isCollectionsReady || collectionStorageMode !== "local") {
+		if (!isCollectionsReady || cloudShoppingEnabled) {
 			return;
 		}
 
 		localStorage.setItem(SHOPPING_STORAGE_KEY, JSON.stringify(shoppingList));
-	}, [collectionStorageMode, isCollectionsReady, shoppingList]);
+	}, [cloudShoppingEnabled, isCollectionsReady, shoppingList]);
 
 	useEffect(() => {
 		if (
 			!isCollectionsReady ||
-			collectionStorageMode !== "cloud" ||
+			!cloudFavoritesEnabled ||
 			!currentUserId
 		) {
 			return;
@@ -859,21 +946,24 @@ export default function RecipesPage() {
 		let isCancelled = false;
 
 		const syncFavoritesToCloud = async () => {
-			const deleteResponse = await supabase.from("recipe_favorites").delete().eq("user_id", currentUserId);
+			const deleteResponse = await supabase.from("favorite_recipes").delete().eq("user_id", currentUserId);
 			if (deleteResponse.error) {
 				throw deleteResponse.error;
 			}
 
 			const rows = Array.from(favoriteRecipes).map((recipeTitle) => ({
 				user_id: currentUserId,
-				recipe_title: recipeTitle,
+				title: recipeTitle,
+				description: favoriteRecipePayloads[recipeTitle]?.description ?? "",
+				instructions: favoriteRecipePayloads[recipeTitle]?.instructions ?? "",
+				image_url: favoriteRecipePayloads[recipeTitle]?.imageUrl ?? null,
 			}));
 
 			if (rows.length === 0) {
 				return;
 			}
 
-			const insertResponse = await supabase.from("recipe_favorites").insert(rows);
+			const insertResponse = await supabase.from("favorite_recipes").insert(rows);
 			if (insertResponse.error) {
 				throw insertResponse.error;
 			}
@@ -885,25 +975,24 @@ export default function RecipesPage() {
 			}
 
 			if (isMissingRecipeCollectionsTableError(error)) {
+				setCloudFavoritesEnabled(false);
 				setCollectionStorageMode("local");
-				setErrorMessage(
-					"Recipe collections switched to local mode because cloud tables are missing."
-				);
+				setCollectionNoticeMessage("Favorites switched to local mode because cloud table is missing.");
 				return;
 			}
 
-			setErrorMessage(toErrorMessage(error, "Failed to sync favorite recipes."));
+			setCollectionNoticeMessage(toErrorMessage(error, "Failed to sync favorite recipes to cloud."));
 		});
 
 		return () => {
 			isCancelled = true;
 		};
-	}, [collectionStorageMode, currentUserId, favoriteRecipes, isCollectionsReady, supabase]);
+	}, [cloudFavoritesEnabled, currentUserId, favoriteRecipePayloads, favoriteRecipes, isCollectionsReady, supabase]);
 
 	useEffect(() => {
 		if (
 			!isCollectionsReady ||
-			collectionStorageMode !== "cloud" ||
+			!cloudShoppingEnabled ||
 			!currentUserId
 		) {
 			return;
@@ -946,20 +1035,18 @@ export default function RecipesPage() {
 			}
 
 			if (isMissingRecipeCollectionsTableError(error)) {
-				setCollectionStorageMode("local");
-				setErrorMessage(
-					"Shopping list switched to local mode because cloud tables are missing."
-				);
+				setCloudShoppingEnabled(false);
+				setCollectionNoticeMessage("Shopping list switched to local mode because cloud table is missing.");
 				return;
 			}
 
-			setErrorMessage(toErrorMessage(error, "Failed to sync shopping list."));
+			setCollectionNoticeMessage(toErrorMessage(error, "Failed to sync shopping list to cloud."));
 		});
 
 		return () => {
 			isCancelled = true;
 		};
-	}, [collectionStorageMode, currentUserId, isCollectionsReady, shoppingList, supabase]);
+	}, [cloudShoppingEnabled, currentUserId, isCollectionsReady, shoppingList, supabase]);
 
 	const generateRecipes = useCallback(async (ingredients: IngredientItem[]) => {
 		if (ingredients.length === 0) {
@@ -1054,7 +1141,10 @@ export default function RecipesPage() {
 		}
 	}, [isAuthChecking, isAuthenticated, loadSmartRecipes]);
 
-	const toggleFavorite = useCallback((recipeTitle: string) => {
+	const toggleFavorite = useCallback((recipe: Recipe) => {
+		const recipeTitle = recipe.title;
+		const alreadyFavorite = favoriteRecipes.has(recipeTitle);
+
 		setFavoriteRecipes((current) => {
 			const next = new Set(current);
 			if (next.has(recipeTitle)) {
@@ -1064,7 +1154,28 @@ export default function RecipesPage() {
 			}
 			return next;
 		});
-	}, []);
+
+		if (alreadyFavorite) {
+			setFavoriteRecipePayloads((current) => {
+				const next = { ...current };
+				delete next[recipeTitle];
+				return next;
+			});
+			setFavoriteToastMessage("Removed from Favorites");
+			return;
+		}
+
+		setFavoriteRecipePayloads((current) => ({
+			...current,
+			[recipeTitle]: {
+				title: recipeTitle,
+				description: recipe.description,
+				instructions: buildRecipeInstructions(recipe),
+				imageUrl: null,
+			},
+		}));
+		setFavoriteToastMessage("Added to Favorites");
+	}, [favoriteRecipes]);
 
 	const handleShare = useCallback(async (recipe: Recipe) => {
 		const text = `${recipe.title}\n${recipe.description}\nPrep: ${recipe.prepTimeMinutes} min | Servings: ${recipe.servings}`;
@@ -1153,7 +1264,7 @@ export default function RecipesPage() {
 
 		const note = String(recipeNotes[recipeTitle] ?? "").trim();
 
-		if (collectionStorageMode === "local") {
+		if (!cloudNotesEnabled) {
 			return;
 		}
 
@@ -1191,14 +1302,14 @@ export default function RecipesPage() {
 			}
 		} catch (error) {
 			if (isMissingRecipeCollectionsTableError(error)) {
-				setCollectionStorageMode("local");
-				setErrorMessage("Notes switched to local mode because cloud tables are missing.");
+				setCloudNotesEnabled(false);
+				setCollectionNoticeMessage("Notes switched to local mode because cloud table is missing.");
 				return;
 			}
 
 			setErrorMessage(toErrorMessage(error, "Failed to save recipe note."));
 		}
-	}, [collectionStorageMode, currentUserId, isCollectionsReady, recipeNotes, supabase]);
+	}, [cloudNotesEnabled, currentUserId, isCollectionsReady, recipeNotes, supabase]);
 
 	const askAssistantForNote = useCallback(
 		async (recipe: Recipe) => {
@@ -1561,6 +1672,19 @@ export default function RecipesPage() {
 
 	return (
 		<main className="min-h-screen bg-[radial-gradient(circle_at_top,_#fff7ed_0%,_#fffbeb_42%,_#ecfdf5_100%)] px-4 py-8 pb-28">
+			<AnimatePresence>
+				{favoriteToastMessage ? (
+					<motion.div
+						initial={{ opacity: 0, y: -10 }}
+						animate={{ opacity: 1, y: 0 }}
+						exit={{ opacity: 0, y: -10 }}
+						className="fixed left-1/2 top-4 z-[60] -translate-x-1/2 rounded-full border border-emerald-200 bg-white px-4 py-2 text-xs font-semibold text-emerald-700 shadow-lg"
+					>
+						{favoriteToastMessage}
+					</motion.div>
+				) : null}
+			</AnimatePresence>
+
 			<div className="mx-auto w-full max-w-sm">
 				<section className="rounded-3xl border border-orange-100/80 bg-white/75 p-5 shadow-[0_20px_45px_-25px_rgba(194,65,12,0.45)] backdrop-blur">
 					<div className="flex items-start justify-between gap-3">
@@ -1618,6 +1742,12 @@ export default function RecipesPage() {
 								</li>
 							))}
 						</ul>
+					) : null}
+
+					{collectionNoticeMessage ? (
+						<p className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+							{collectionNoticeMessage}
+						</p>
 					) : null}
 
 					{!isLoading && !errorMessage && recipes.length > 0 ? (
@@ -1686,7 +1816,7 @@ export default function RecipesPage() {
 										<div className="flex items-center gap-1">
 											<button
 												type="button"
-												onClick={() => toggleFavorite(recipe.title)}
+												onClick={() => toggleFavorite(recipe)}
 												className={`rounded-full border p-2 transition ${
 													favorite
 														? "border-rose-300 bg-rose-100 text-rose-600"

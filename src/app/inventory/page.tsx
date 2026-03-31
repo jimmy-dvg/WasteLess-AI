@@ -27,13 +27,13 @@ type FoodItem = {
 	created_at: string | null;
 };
 
-type PantryRow = {
+type PantryApiRow = {
 	id?: unknown;
 	name?: unknown;
 	category?: unknown;
-	shelf_life_days?: unknown;
-	created_at?: unknown;
-	storage_zone?: unknown;
+	shelfLifeDays?: unknown;
+	createdAt?: unknown;
+	storageZone?: unknown;
 };
 
 type StorageFilter = StorageZone | "all";
@@ -43,22 +43,6 @@ const STORAGE_FILTERS: Array<{ value: StorageFilter; label: string }> = [
 	{ value: "all", label: "All" },
 	...STORAGE_ZONES.map((zone) => ({ value: zone, label: getStorageZoneLabel(zone) })),
 ];
-
-function isMissingStorageZoneColumnError(error: unknown): boolean {
-	if (typeof error !== "object" || error === null) {
-		return false;
-	}
-
-	const code = "code" in error ? String((error as { code?: string }).code ?? "") : "";
-	const message = "message" in error ? String((error as { message?: string }).message ?? "") : "";
-
-	return (
-		code === "42703" ||
-		message.includes("column pantry_items.storage_zone does not exist") ||
-		message.includes("column \"storage_zone\" does not exist") ||
-		message.includes("Could not find the 'storage_zone' column of 'pantry_items' in the schema cache")
-	);
-}
 
 function startOfToday(): Date {
 	const now = new Date();
@@ -197,35 +181,39 @@ export default function InventoryPage() {
 				setIsRefreshing(true);
 			}
 
-			const withStorageZone = await supabase
-				.from("pantry_items")
-				.select("id, name, category, shelf_life_days, created_at, storage_zone")
-				.order("created_at", { ascending: false });
+			const {
+				data: { session },
+			} = await supabase.auth.getSession();
 
-			let data: unknown = withStorageZone.data;
-			let error: unknown = withStorageZone.error;
-
-			if (error && isMissingStorageZoneColumnError(error)) {
-				const withoutStorageZone = await supabase
-					.from("pantry_items")
-					.select("id, name, category, shelf_life_days, created_at")
-					.order("created_at", { ascending: false });
-
-				data = withoutStorageZone.data;
-				error = withoutStorageZone.error;
+			if (!session?.access_token) {
+				router.replace("/login");
+				return;
 			}
 
-			if (error) {
-				throw error;
+			const response = await fetch("/api/pantry", {
+				method: "GET",
+				headers: {
+					Authorization: `Bearer ${session.access_token}`,
+				},
+			});
+
+			const payload: unknown = await response.json();
+
+			if (!response.ok) {
+				const details =
+					typeof payload === "object" && payload !== null && "details" in payload
+						? String((payload as { details?: string }).details ?? "")
+						: "Failed to load inventory.";
+				throw new Error(details);
 			}
 
-			const pantryRows = Array.isArray(data) ? (data as PantryRow[]) : [];
+			const pantryRows = Array.isArray(payload) ? (payload as PantryApiRow[]) : [];
 
 			const pantryItems = pantryRows
 				.map((item) => {
-					const createdAt = item.created_at ? String(item.created_at) : null;
+					const createdAt = item.createdAt ? String(item.createdAt) : null;
 					const category = String(item.category ?? "Other").trim() || "Other";
-					const shelfLifeDays = Number(item.shelf_life_days ?? 0);
+					const shelfLifeDays = Number(item.shelfLifeDays ?? 0);
 					const derivedExpiryDate =
 						createdAt !== null && Number.isFinite(shelfLifeDays)
 							? addDays(createdAt, Math.max(0, Math.round(shelfLifeDays)))
@@ -235,7 +223,7 @@ export default function InventoryPage() {
 						id: String(item.id ?? ""),
 						name: String(item.name ?? "Unnamed item"),
 						category,
-						storageZone: resolveStorageZone(item.storage_zone, category),
+						storageZone: resolveStorageZone(item.storageZone, category),
 						expiry_date: derivedExpiryDate,
 						created_at: createdAt,
 					};
@@ -264,7 +252,7 @@ export default function InventoryPage() {
 			}
 			setIsRefreshing(false);
 		}
-	}, [isAuthenticated, supabase]);
+	}, [isAuthenticated, router, supabase]);
 
 	useEffect(() => {
 		if (!isAuthChecking && isAuthenticated) {

@@ -40,14 +40,107 @@ type RecipeOutput = {
 	steps: RecipeStepOutput[];
 };
 
+type GeminiModelListResponse = {
+	models?: Array<{
+		name?: string;
+		supportedGenerationMethods?: string[];
+	}>;
+};
+
 const DEFAULT_RECIPE_MODELS = [
+	"gemini-2.5-flash-preview-05-20",
 	"gemini-2.0-flash-lite",
 	"gemini-2.0-flash",
 	"gemini-2.5-flash",
 	"gemini-2.5-flash-latest",
-	"gemini-1.5-flash-latest",
-	"gemini-1.5-flash",
 ];
+
+function normalizeModelName(modelName: string): string {
+	return modelName.trim().replace(/^models\//i, "");
+}
+
+function parseModelList(raw: string | undefined): string[] {
+	if (!raw || raw.trim().length === 0) {
+		return [];
+	}
+
+	return Array.from(
+		new Set(
+			raw
+				.split(",")
+				.map((model) => normalizeModelName(model))
+				.filter((model) => model.length > 0)
+		)
+	);
+}
+
+function rankDiscoveredModel(modelName: string): number {
+	const normalized = modelName.toLowerCase();
+
+	if (normalized.includes("flash") && normalized.includes("2.5")) {
+		return 0;
+	}
+
+	if (normalized.includes("flash") && normalized.includes("2.0")) {
+		return 1;
+	}
+
+	if (normalized.includes("flash")) {
+		return 2;
+	}
+
+	if (normalized.includes("pro")) {
+		return 3;
+	}
+
+	return 4;
+}
+
+async function fetchDiscoveredGeminiModels(apiKey: string): Promise<string[]> {
+	try {
+		const response = await fetch(
+			`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`,
+			{
+				method: "GET",
+				headers: {
+					"Content-Type": "application/json",
+				},
+				cache: "no-store",
+			}
+		);
+
+		if (!response.ok) {
+			return [];
+		}
+
+		const payload = (await response.json()) as GeminiModelListResponse;
+
+		return (payload.models ?? [])
+			.filter((model) =>
+				Array.isArray(model.supportedGenerationMethods) &&
+				model.supportedGenerationMethods.some(
+					(method) => method.toLowerCase() === "generatecontent"
+				)
+			)
+			.map((model) => normalizeModelName(String(model.name ?? "")))
+			.filter(
+				(model) =>
+					model.startsWith("gemini-") &&
+					!model.toLowerCase().includes("embedding") &&
+					!model.toLowerCase().includes("aqa")
+			)
+			.sort((a, b) => {
+				const rankDelta = rankDiscoveredModel(a) - rankDiscoveredModel(b);
+				if (rankDelta !== 0) {
+					return rankDelta;
+				}
+
+				return a.localeCompare(b);
+			});
+	} catch {
+		return [];
+	}
+}
 
 function getBearerToken(request: Request): string | null {
 	const header = request.headers.get("authorization");
@@ -356,25 +449,22 @@ function normalizeRecipes(payload: unknown[]): RecipeOutput[] {
 	return recipes;
 }
 
-function getRecipeModelCandidates(): string[] {
-	const recipeModels = process.env.RECIPE_GEMINI_MODELS;
-	const sharedModels = process.env.GEMINI_MODELS;
-	const source = recipeModels && recipeModels.trim().length > 0 ? recipeModels : sharedModels;
+async function getRecipeModelCandidates(apiKey: string): Promise<string[]> {
+	const configuredModels = parseModelList(
+		process.env.RECIPE_GEMINI_MODELS && process.env.RECIPE_GEMINI_MODELS.trim().length > 0
+			? process.env.RECIPE_GEMINI_MODELS
+			: process.env.GEMINI_MODELS
+	);
 
-	if (!source || source.trim().length === 0) {
-		return DEFAULT_RECIPE_MODELS;
-	}
+	const discoveredModels = await fetchDiscoveredGeminiModels(apiKey);
 
-	const parsed = source
-		.split(",")
-		.map((model) => model.trim())
-		.filter((model) => model.length > 0);
-
-	if (parsed.length === 0) {
-		return DEFAULT_RECIPE_MODELS;
-	}
-
-	return Array.from(new Set(parsed));
+	return Array.from(
+		new Set([
+			...discoveredModels,
+			...configuredModels,
+			...DEFAULT_RECIPE_MODELS,
+		])
+	);
 }
 
 export async function POST(request: Request) {
@@ -413,11 +503,12 @@ export async function POST(request: Request) {
 		const prompt = buildPrompt(items);
 
 		const genAI = new GoogleGenerativeAI(apiKey);
-		const modelCandidates = getRecipeModelCandidates();
+		const modelCandidates = await getRecipeModelCandidates(apiKey);
 
 		let responseText = "";
 		let selectedModel = "";
 		let lastError: unknown;
+		const attemptErrors: string[] = [];
 
 		for (const modelName of modelCandidates) {
 			try {
@@ -433,13 +524,18 @@ export async function POST(request: Request) {
 				break;
 			} catch (error) {
 				lastError = error;
+				if (error instanceof Error) {
+					attemptErrors.push(`${modelName}: ${error.message}`);
+				}
 			}
 		}
 
 		if (!responseText) {
 			if (lastError instanceof Error) {
+				const compactAttemptErrors = attemptErrors.slice(0, 6).join(" | ");
+				const attemptsSummary = compactAttemptErrors.length > 0 ? ` Tried: ${compactAttemptErrors}` : "";
 				throw new Error(
-					`No available Gemini model could generate recipes. Last error: ${lastError.message}`
+					`No available Gemini model could generate recipes. Last error: ${lastError.message}.${attemptsSummary}`
 				);
 			}
 
