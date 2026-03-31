@@ -44,6 +44,75 @@ export type Database = {
         }
         Relationships: []
       }
+      recipe_favorites: {
+        Row: {
+          created_at: string
+          recipe_title: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          recipe_title: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          recipe_title?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      recipe_notes: {
+        Row: {
+          note: string
+          recipe_title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          note?: string
+          recipe_title: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          note?: string
+          recipe_title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      shopping_list_items: {
+        Row: {
+          amount: number
+          created_at: string
+          id: number
+          name: string
+          recipe_title: string
+          unit: string
+          user_id: string
+        }
+        Insert: {
+          amount?: number
+          created_at?: string
+          id?: number
+          name: string
+          recipe_title: string
+          unit?: string
+          user_id: string
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          id?: number
+          name?: string
+          recipe_title?: string
+          unit?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string
