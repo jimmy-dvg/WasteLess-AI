@@ -4,7 +4,8 @@ import BottomNav from "@/components/BottomNav";
 import { getSupabaseBrowserClient } from "@/src/lib/supabase-browser";
 import { AnimatePresence, motion } from "framer-motion";
 import { ChefHat, Sparkles, X } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 type IngredientItem = {
 	id: string;
@@ -61,7 +62,6 @@ async function fetchTopExpiryItems(): Promise<IngredientItem[]> {
 
 	const pantryItems = Array.isArray(pantryResponse.data) ? pantryResponse.data : [];
 	return pantryItems
-		.filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
 		.map((item) => {
 			const createdAt = item.created_at ? String(item.created_at) : "";
 			const shelfLifeDays = Number(item.shelf_life_days ?? 0);
@@ -92,6 +92,10 @@ async function fetchTopExpiryItems(): Promise<IngredientItem[]> {
 }
 
 export default function RecipesPage() {
+	const router = useRouter();
+	const supabase = useMemo(() => getSupabaseBrowserClient(), []);
+	const [isAuthChecking, setIsAuthChecking] = useState(true);
+	const [isAuthenticated, setIsAuthenticated] = useState(false);
 	const [sourceItems, setSourceItems] = useState<IngredientItem[]>([]);
 	const [recipes, setRecipes] = useState<Recipe[]>([]);
 	const [isLoading, setIsLoading] = useState(true);
@@ -99,9 +103,65 @@ export default function RecipesPage() {
 	const [errorMessage, setErrorMessage] = useState<string | null>(null);
 	const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
 
+	useEffect(() => {
+		let isMounted = true;
+
+		const syncAuthState = async () => {
+			const {
+				data: { session },
+			} = await supabase.auth.getSession();
+
+			if (!isMounted) {
+				return;
+			}
+
+			if (!session?.access_token) {
+				setIsAuthenticated(false);
+				setIsAuthChecking(false);
+				router.replace("/login");
+				return;
+			}
+
+			setIsAuthenticated(true);
+			setIsAuthChecking(false);
+		};
+
+		void syncAuthState();
+
+		const {
+			data: { subscription },
+		} = supabase.auth.onAuthStateChange((_event, session) => {
+			if (!isMounted) {
+				return;
+			}
+
+			if (!session?.access_token) {
+				setIsAuthenticated(false);
+				router.replace("/login");
+				return;
+			}
+
+			setIsAuthenticated(true);
+		});
+
+		return () => {
+			isMounted = false;
+			subscription.unsubscribe();
+		};
+	}, [router, supabase]);
+
 	const generateRecipes = useCallback(async (ingredients: IngredientItem[]) => {
 		if (ingredients.length === 0) {
 			throw new Error("No ingredients available yet. Scan food items first.");
+		}
+
+		const {
+			data: { session },
+		} = await supabase.auth.getSession();
+
+		if (!session?.access_token) {
+			router.replace("/login");
+			throw new Error("Please log in to generate recipes.");
 		}
 
 		const payload = ingredients.map((item) => ({
@@ -113,6 +173,7 @@ export default function RecipesPage() {
 			method: "POST",
 			headers: {
 				"Content-Type": "application/json",
+				Authorization: `Bearer ${session.access_token}`,
 			},
 			body: JSON.stringify(payload),
 		});
@@ -154,10 +215,14 @@ export default function RecipesPage() {
 		}
 
 		setRecipes(normalized);
-	}, []);
+	}, [router, supabase]);
 
 	const loadSmartRecipes = useCallback(async () => {
 		try {
+			if (!isAuthenticated) {
+				return;
+			}
+
 			setIsLoading(true);
 			setErrorMessage(null);
 			setSelectedRecipe(null);
@@ -171,10 +236,15 @@ export default function RecipesPage() {
 		} finally {
 			setIsLoading(false);
 		}
-	}, [generateRecipes]);
+	}, [generateRecipes, isAuthenticated]);
 
 	const regenerateRecipes = useCallback(async () => {
 		try {
+			if (!isAuthenticated) {
+				router.replace("/login");
+				return;
+			}
+
 			setIsRegenerating(true);
 			setErrorMessage(null);
 			setSelectedRecipe(null);
@@ -184,11 +254,27 @@ export default function RecipesPage() {
 		} finally {
 			setIsRegenerating(false);
 		}
-	}, [generateRecipes, sourceItems]);
+	}, [generateRecipes, isAuthenticated, router, sourceItems]);
 
 	useEffect(() => {
-		void loadSmartRecipes();
-	}, [loadSmartRecipes]);
+		if (!isAuthChecking && isAuthenticated) {
+			void loadSmartRecipes();
+		}
+	}, [isAuthChecking, isAuthenticated, loadSmartRecipes]);
+
+	if (isAuthChecking) {
+		return (
+			<main className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top,_#fff7ed_0%,_#fffbeb_42%,_#ecfdf5_100%)] px-4">
+				<p className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm">
+					Checking session...
+				</p>
+			</main>
+		);
+	}
+
+	if (!isAuthenticated) {
+		return null;
+	}
 
 	return (
 		<main className="min-h-screen bg-[radial-gradient(circle_at_top,_#fff7ed_0%,_#fffbeb_42%,_#ecfdf5_100%)] px-4 py-8 pb-28">

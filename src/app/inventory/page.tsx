@@ -9,6 +9,7 @@ import {
 	Search,
 	Trash2,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 type FoodItem = {
@@ -87,6 +88,10 @@ function addDays(dateInput: string, days: number): string | null {
 }
 
 export default function InventoryPage() {
+	const router = useRouter();
+	const supabase = useMemo(() => getSupabaseBrowserClient(), []);
+	const [isAuthChecking, setIsAuthChecking] = useState(true);
+	const [isAuthenticated, setIsAuthenticated] = useState(false);
 	const [items, setItems] = useState<FoodItem[]>([]);
 	const [searchQuery, setSearchQuery] = useState("");
 	const [isLoading, setIsLoading] = useState(true);
@@ -94,8 +99,59 @@ export default function InventoryPage() {
 	const [errorMessage, setErrorMessage] = useState<string | null>(null);
 	const [deletingItemId, setDeletingItemId] = useState<string | null>(null);
 
+	useEffect(() => {
+		let isMounted = true;
+
+		const syncAuthState = async () => {
+			const {
+				data: { session },
+			} = await supabase.auth.getSession();
+
+			if (!isMounted) {
+				return;
+			}
+
+			if (!session?.access_token) {
+				setIsAuthenticated(false);
+				setIsAuthChecking(false);
+				router.replace("/login");
+				return;
+			}
+
+			setIsAuthenticated(true);
+			setIsAuthChecking(false);
+		};
+
+		void syncAuthState();
+
+		const {
+			data: { subscription },
+		} = supabase.auth.onAuthStateChange((_event, session) => {
+			if (!isMounted) {
+				return;
+			}
+
+			if (!session?.access_token) {
+				setIsAuthenticated(false);
+				router.replace("/login");
+				return;
+			}
+
+			setIsAuthenticated(true);
+		});
+
+		return () => {
+			isMounted = false;
+			subscription.unsubscribe();
+		};
+	}, [router, supabase]);
+
 	const loadItems = useCallback(async (showLoader: boolean) => {
 		try {
+			if (!isAuthenticated) {
+				return;
+			}
+
 			setErrorMessage(null);
 			if (showLoader) {
 				setIsLoading(true);
@@ -103,7 +159,6 @@ export default function InventoryPage() {
 				setIsRefreshing(true);
 			}
 
-			const supabase = getSupabaseBrowserClient();
 			const response = await supabase
 				.from("pantry_items")
 				.select("id, name, shelf_life_days, created_at")
@@ -113,40 +168,39 @@ export default function InventoryPage() {
 				throw response.error;
 			}
 
-			const pantryItems = Array.isArray(response.data)
-				? response.data
-						.filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
-						.map((item) => {
-							const createdAt = item.created_at ? String(item.created_at) : null;
-							const shelfLifeDays = Number(item.shelf_life_days ?? 0);
-							const derivedExpiryDate =
-								createdAt !== null && Number.isFinite(shelfLifeDays)
-									? addDays(createdAt, Math.max(0, Math.round(shelfLifeDays)))
-									: null;
+			const pantryRows = Array.isArray(response.data) ? response.data : [];
 
-							return {
-								id: String(item.id ?? ""),
-								name: String(item.name ?? "Unnamed item"),
-								quantity: null,
-								expiry_date: derivedExpiryDate,
-								created_at: createdAt,
-								sourceTable: "pantry_items" as const,
-							};
-						})
-						.filter((item) => item.id.length > 0)
-						.sort((a, b) => {
-							if (!a.expiry_date && !b.expiry_date) {
-								return 0;
-							}
-							if (!a.expiry_date) {
-								return 1;
-							}
-							if (!b.expiry_date) {
-								return -1;
-							}
-							return new Date(a.expiry_date).getTime() - new Date(b.expiry_date).getTime();
-						})
-				: [];
+			const pantryItems = pantryRows
+				.map((item) => {
+					const createdAt = item.created_at ? String(item.created_at) : null;
+					const shelfLifeDays = Number(item.shelf_life_days ?? 0);
+					const derivedExpiryDate =
+						createdAt !== null && Number.isFinite(shelfLifeDays)
+							? addDays(createdAt, Math.max(0, Math.round(shelfLifeDays)))
+							: null;
+
+					return {
+						id: String(item.id ?? ""),
+						name: String(item.name ?? "Unnamed item"),
+						quantity: null,
+						expiry_date: derivedExpiryDate,
+						created_at: createdAt,
+						sourceTable: "pantry_items" as const,
+					};
+				})
+				.filter((item) => item.id.length > 0)
+				.sort((a, b) => {
+					if (!a.expiry_date && !b.expiry_date) {
+						return 0;
+					}
+					if (!a.expiry_date) {
+						return 1;
+					}
+					if (!b.expiry_date) {
+						return -1;
+					}
+					return new Date(a.expiry_date).getTime() - new Date(b.expiry_date).getTime();
+				});
 
 			setItems(pantryItems);
 		} catch (error) {
@@ -158,11 +212,13 @@ export default function InventoryPage() {
 			}
 			setIsRefreshing(false);
 		}
-	}, []);
+	}, [isAuthenticated, supabase]);
 
 	useEffect(() => {
-		void loadItems(true);
-	}, [loadItems]);
+		if (!isAuthChecking && isAuthenticated) {
+			void loadItems(true);
+		}
+	}, [isAuthChecking, isAuthenticated, loadItems]);
 
 	const filteredItems = useMemo(() => {
 		const query = searchQuery.trim().toLowerCase();
@@ -178,6 +234,11 @@ export default function InventoryPage() {
 			return;
 		}
 
+		if (!isAuthenticated) {
+			router.replace("/login");
+			return;
+		}
+
 		setDeletingItemId(id);
 		setErrorMessage(null);
 
@@ -187,7 +248,6 @@ export default function InventoryPage() {
 				return;
 			}
 
-			const supabase = getSupabaseBrowserClient();
 			const { error } = await supabase.from(selectedItem.sourceTable).delete().eq("id", id);
 
 			if (error) {
@@ -201,7 +261,21 @@ export default function InventoryPage() {
 		} finally {
 			setDeletingItemId(null);
 		}
-	}, [deletingItemId, items]);
+	}, [deletingItemId, isAuthenticated, items, router, supabase]);
+
+	if (isAuthChecking) {
+		return (
+			<main className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top,_#ecfeff_0%,_#f8fafc_45%,_#f1f5f9_100%)] px-4">
+				<p className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm">
+					Checking session...
+				</p>
+			</main>
+		);
+	}
+
+	if (!isAuthenticated) {
+		return null;
+	}
 
 	return (
 		<main className="min-h-screen bg-[radial-gradient(circle_at_top,_#ecfeff_0%,_#f8fafc_45%,_#f1f5f9_100%)] px-4 py-7 pb-28">

@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { getSupabaseServerClient } from "@/src/lib/supabase-server";
 import { NextResponse } from "next/server";
 
 type FoodItemInput = {
@@ -20,6 +21,20 @@ const DEFAULT_RECIPE_MODELS = [
 	"gemini-1.5-flash-latest",
 	"gemini-1.5-flash",
 ];
+
+function getBearerToken(request: Request): string | null {
+	const header = request.headers.get("authorization");
+	if (!header) {
+		return null;
+	}
+
+	const [scheme, token] = header.split(" ");
+	if (scheme?.toLowerCase() !== "bearer" || !token) {
+		return null;
+	}
+
+	return token;
+}
 
 function parseJsonArray(raw: string): unknown[] {
 	const trimmed = raw.trim();
@@ -151,6 +166,27 @@ export async function POST(request: Request) {
 			return NextResponse.json(
 				{ error: "Missing GEMINI_API_KEY environment variable." },
 				{ status: 500 }
+			);
+		}
+
+		const token = getBearerToken(request);
+		if (!token) {
+			return NextResponse.json(
+				{ error: "Unauthorized", details: "Authentication is required." },
+				{ status: 401 }
+			);
+		}
+
+		const authClient = getSupabaseServerClient();
+		const {
+			data: { user },
+			error: userError,
+		} = await authClient.auth.getUser(token);
+
+		if (userError || !user) {
+			return NextResponse.json(
+				{ error: "Unauthorized", details: "Invalid or expired session." },
+				{ status: 401 }
 			);
 		}
 

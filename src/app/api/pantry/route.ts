@@ -156,7 +156,7 @@ export async function GET(request: Request) {
 
 		const { data, error } = await supabase
 			.from("pantry_items")
-			.select("id, name, category, shelf_life_days, created_at")
+			.select("id, name, category, shelf_life_days, created_at, user_id")
 			.eq("user_id", userId)
 			.order("created_at", { ascending: false })
 			.limit(50);
@@ -168,7 +168,7 @@ export async function GET(request: Request) {
 		if (error && isMissingUserIdColumnError(error)) {
 			const fallback = await supabase
 				.from("pantry_items")
-				.select("id, name, category, shelf_life_days, created_at")
+				.select("id, name, category, shelf_life_days, created_at, user_id")
 				.order("created_at", { ascending: false })
 				.limit(50);
 
@@ -230,7 +230,7 @@ export async function POST(request: Request) {
 		const { data, error } = await supabase
 			.from("pantry_items")
 			.insert(insertRows)
-			.select("id, name, category, shelf_life_days, created_at");
+			.select("id, name, category, shelf_life_days, created_at, user_id");
 
 		if (error && !isMissingUserIdColumnError(error)) {
 			throw error;
@@ -246,7 +246,7 @@ export async function POST(request: Request) {
 			const fallback = await supabase
 				.from("pantry_items")
 				.insert(fallbackInsertRows)
-				.select("id, name, category, shelf_life_days, created_at");
+				.select("id, name, category, shelf_life_days, created_at, user_id");
 
 			if (fallback.error) {
 				throw fallback.error;

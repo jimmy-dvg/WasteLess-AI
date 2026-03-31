@@ -72,7 +72,6 @@ async function loadDashboardItems(): Promise<DashboardItem[]> {
 
 	const pantryItems = Array.isArray(pantryResponse.data) ? pantryResponse.data : [];
 	return pantryItems
-		.filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
 		.map((item) => {
 			const createdAt = item.created_at ? String(item.created_at) : "";
 			const shelfLifeDays = Number(item.shelf_life_days ?? 0);

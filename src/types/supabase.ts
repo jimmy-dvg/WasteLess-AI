@@ -21,6 +21,7 @@ export type Database = {
           id: string
           name: string
           shelf_life_days: number
+          user_id: string | null
         }
         Insert: {
           category?: string
@@ -28,6 +29,7 @@ export type Database = {
           id?: string
           name: string
           shelf_life_days?: number
+          user_id?: string | null
         }
         Update: {
           category?: string
@@ -35,6 +37,25 @@ export type Database = {
           id?: string
           name?: string
           shelf_life_days?: number
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      profiles: {
+        Row: {
+          created_at: string
+          id: string
+          role: string
+        }
+        Insert: {
+          created_at?: string
+          id: string
+          role?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          role?: string
         }
         Relationships: []
       }

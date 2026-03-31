@@ -54,6 +54,8 @@ function fileToBase64(file: File): Promise<string> {
 export default function ScanPage() {
 	const router = useRouter();
 	const supabase = useMemo(() => getSupabaseBrowserClient(), []);
+	const [isAuthChecking, setIsAuthChecking] = useState(true);
+	const [isAuthenticated, setIsAuthenticated] = useState(false);
 	const [selectedFile, setSelectedFile] = useState<File | null>(null);
 	const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 	const [detectedItems, setDetectedItems] = useState<DetectedFoodItem[]>([]);
@@ -61,6 +63,53 @@ export default function ScanPage() {
 	const [infoMessage, setInfoMessage] = useState<string | null>(null);
 	const [isProcessing, setIsProcessing] = useState(false);
 	const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+	useEffect(() => {
+		let isMounted = true;
+
+		const syncAuthState = async () => {
+			const {
+				data: { session },
+			} = await supabase.auth.getSession();
+
+			if (!isMounted) {
+				return;
+			}
+
+			if (!session?.access_token) {
+				setIsAuthenticated(false);
+				setIsAuthChecking(false);
+				router.replace("/login");
+				return;
+			}
+
+			setIsAuthenticated(true);
+			setIsAuthChecking(false);
+		};
+
+		void syncAuthState();
+
+		const {
+			data: { subscription },
+		} = supabase.auth.onAuthStateChange((_event, session) => {
+			if (!isMounted) {
+				return;
+			}
+
+			if (!session?.access_token) {
+				setIsAuthenticated(false);
+				router.replace("/login");
+				return;
+			}
+
+			setIsAuthenticated(true);
+		});
+
+		return () => {
+			isMounted = false;
+			subscription.unsubscribe();
+		};
+	}, [router, supabase]);
 
 	useEffect(() => {
 		if (!selectedFile) {
@@ -85,7 +134,7 @@ export default function ScanPage() {
 	};
 
 	const handleProcessImage = async () => {
-		if (!selectedFile || isProcessing) {
+		if (!selectedFile || isProcessing || isAuthChecking || !isAuthenticated) {
 			return;
 		}
 
@@ -94,12 +143,22 @@ export default function ScanPage() {
 		setInfoMessage(null);
 
 		try {
+			const {
+				data: { session },
+			} = await supabase.auth.getSession();
+
+			if (!session?.access_token) {
+				router.replace("/login");
+				throw new Error("Please log in to scan and save food items.");
+			}
+
 			const imageBase64 = await fileToBase64(selectedFile);
 
 			const response = await fetch("/api/analyze", {
 				method: "POST",
 				headers: {
 					"Content-Type": "application/json",
+					Authorization: `Bearer ${session.access_token}`,
 				},
 				body: JSON.stringify({ imageBase64 }),
 			});
@@ -138,15 +197,6 @@ export default function ScanPage() {
 				}));
 
 			setDetectedItems(normalized);
-
-			const {
-				data: { session },
-			} = await supabase.auth.getSession();
-
-			if (!session?.access_token) {
-				router.push("/login");
-				throw new Error("Please log in to save scanned food items.");
-			}
 
 			let infoText: string | null = null;
 
@@ -208,6 +258,20 @@ export default function ScanPage() {
 			setIsProcessing(false);
 		}
 	};
+
+	if (isAuthChecking) {
+		return (
+			<main className="flex min-h-screen items-center justify-center bg-gradient-to-b from-slate-50 via-white to-emerald-50/40 px-4">
+				<p className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm">
+					Checking session...
+				</p>
+			</main>
+		);
+	}
+
+	if (!isAuthenticated) {
+		return null;
+	}
 
 	return (
 		<main className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-emerald-50/40 px-4 py-8 pb-28">
