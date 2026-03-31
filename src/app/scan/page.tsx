@@ -1,6 +1,11 @@
 "use client";
 
 import BottomNav from "@/components/BottomNav";
+import {
+	getStorageZoneLabel,
+	resolveStorageZone,
+	type StorageZone,
+} from "@/src/lib/storage-zone";
 import { getSupabaseBrowserClient } from "@/src/lib/supabase-browser";
 import { AnimatePresence, motion } from "framer-motion";
 import { Camera } from "lucide-react";
@@ -12,28 +17,8 @@ type DetectedFoodItem = {
 	name: string;
 	category: string;
 	shelfLifeDays: number;
+	storageZone: StorageZone;
 };
-
-type SupabaseLikeError = {
-	message?: string;
-	code?: string;
-};
-
-function isMissingUserIdColumnError(error: unknown): boolean {
-	if (typeof error !== "object" || error === null) {
-		return false;
-	}
-
-	const code = String((error as SupabaseLikeError).code ?? "");
-	const message = String((error as SupabaseLikeError).message ?? "");
-
-	return (
-		code === "42703" ||
-		message.includes("column pantry_items.user_id does not exist") ||
-		message.includes("column \"user_id\" does not exist") ||
-		message.includes("Could not find the 'user_id' column of 'pantry_items' in the schema cache")
-	);
-}
 
 function fileToBase64(file: File): Promise<string> {
 	return new Promise((resolve, reject) => {
@@ -190,50 +175,75 @@ export default function ScanPage() {
 
 			const normalized = data
 				.filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
-				.map((item) => ({
-					name: String(item.name ?? "Unknown"),
-					category: String(item.category ?? "Uncategorized"),
-					shelfLifeDays: Number(item.shelfLifeDays ?? 0),
-				}));
+				.map((item) => {
+					const category = String(item.category ?? "Uncategorized").trim() || "Uncategorized";
+					const rawShelfLife = Number(item.shelfLifeDays ?? 0);
+
+					return {
+						name: String(item.name ?? "Unknown").trim() || "Unknown",
+						category,
+						shelfLifeDays: Number.isFinite(rawShelfLife)
+							? Math.max(0, Math.round(rawShelfLife))
+							: 0,
+						storageZone: resolveStorageZone(item.storageZone ?? item.storage_zone, category),
+					};
+				});
 
 			setDetectedItems(normalized);
 
 			let infoText: string | null = null;
 
-			const insertWithUserId = normalized.map((item) => ({
+			const pantryPayload = normalized.map((item) => ({
 				name: item.name,
 				category: item.category,
-				shelf_life_days: item.shelfLifeDays,
-				user_id: session.user.id,
+				shelfLifeDays: item.shelfLifeDays,
+				storageZone: item.storageZone,
 			}));
 
-			let saveError: unknown = null;
-			let saveResult = await supabase.from("pantry_items").insert(insertWithUserId);
+			const saveResponse = await fetch("/api/pantry", {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: `Bearer ${session.access_token}`,
+				},
+				body: JSON.stringify(pantryPayload),
+			});
 
-			if (saveResult.error && isMissingUserIdColumnError(saveResult.error)) {
-				const insertWithoutUserId = normalized.map((item) => ({
-					name: item.name,
-					category: item.category,
-					shelf_life_days: item.shelfLifeDays,
-				}));
+			const saveData: unknown = await saveResponse.json().catch(() => null);
 
-				saveResult = await supabase.from("pantry_items").insert(insertWithoutUserId);
-			}
-
-			saveError = saveResult.error;
-
-			if (saveError) {
+			if (!saveResponse.ok) {
 				const saveDetails =
-					typeof saveError === "object" && saveError !== null && "message" in saveError
-						? String((saveError as { message?: string }).message ?? "")
+					typeof saveData === "object" && saveData !== null
+						? String(
+								(saveData as { details?: string; error?: string }).details ??
+									(saveData as { details?: string; error?: string }).error ??
+									""
+							).trim()
 						: "";
 
+				infoText = saveDetails
+					? `AI analysis finished, but database save failed: ${saveDetails}`
+					: "AI analysis finished, but database save failed.";
+			} else {
+				const insertedCount =
+					typeof saveData === "object" && saveData !== null && "inserted" in saveData
+						? Number((saveData as { inserted?: number }).inserted ?? 0)
+						: 0;
+
+				const compatibilityMode =
+					typeof saveData === "object" && saveData !== null && "compatibilityMode" in saveData
+						? Boolean((saveData as { compatibilityMode?: boolean }).compatibilityMode)
+						: false;
+
+				const countLabel = insertedCount === 1 ? "item" : "items";
 				infoText =
-					saveDetails
-						? `AI analysis finished, but database save failed: ${saveDetails}`
-						: "AI analysis finished, but database save failed.";
-			} else if (!usedFallback) {
-				infoText = "Saved detected items to your pantry database.";
+					insertedCount > 0
+						? `Saved ${insertedCount} ${countLabel} to your pantry database.`
+						: "Saved detected items to your pantry database.";
+
+				if (compatibilityMode) {
+					infoText = `${infoText} Compatibility mode is active until all pantry migrations are applied.`;
+				}
 			}
 
 			if (usedFallback) {
@@ -364,7 +374,8 @@ export default function ScanPage() {
 									>
 										<p className="font-medium text-slate-900">{item.name}</p>
 										<p className="text-xs text-slate-600">
-											{item.category} • {item.shelfLifeDays} day{item.shelfLifeDays === 1 ? "" : "s"}
+											{item.category} • {getStorageZoneLabel(item.storageZone)} • {item.shelfLifeDays} day
+											{item.shelfLifeDays === 1 ? "" : "s"}
 										</p>
 									</li>
 								))}

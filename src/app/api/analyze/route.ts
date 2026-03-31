@@ -1,9 +1,10 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { getSupabaseServerClient } from "@/src/lib/supabase-server";
+import { resolveStorageZone } from "@/src/lib/storage-zone";
 import { NextResponse } from "next/server";
 
 const ANALYZE_PROMPT =
-	"Identify all food items in this image. For each item, provide its name, a category (Vegetables, Dairy, Meat, Pantry, or Other), and estimated shelfLifeDays as a number. Return the result strictly as a JSON array.";
+	"Identify all food items in this image. For each item, provide its name, a category (Vegetables, Dairy, Meat, Pantry, Drinks, Frozen, or Other), estimated shelfLifeDays as a number, and storageZone as one of: fridge, dry_storage, drinks, freezer, other. Return the result strictly as a JSON array.";
 
 const DEFAULT_FREE_TIER_MODELS = [
 	"gemini-2.5-flash",
@@ -16,9 +17,9 @@ const DEFAULT_FREE_TIER_MODELS = [
 ];
 
 const DEV_FALLBACK_ITEMS = [
-	{ name: "Tomatoes", category: "Vegetables", shelfLifeDays: 5 },
-	{ name: "Milk", category: "Dairy", shelfLifeDays: 3 },
-	{ name: "Rice", category: "Pantry", shelfLifeDays: 180 },
+	{ name: "Tomatoes", category: "Vegetables", shelfLifeDays: 5, storageZone: "fridge" },
+	{ name: "Milk", category: "Dairy", shelfLifeDays: 3, storageZone: "fridge" },
+	{ name: "Rice", category: "Pantry", shelfLifeDays: 180, storageZone: "dry_storage" },
 ];
 
 function getBearerToken(request: Request): string | null {
@@ -81,7 +82,9 @@ function normalizeBase64Image(imageBase64: string): { mimeType: string; data: st
 	};
 }
 
-function normalizeAnalyzedItems(items: unknown[]): Array<{ name: string; category: string; shelfLifeDays: number }> {
+function normalizeAnalyzedItems(
+	items: unknown[]
+): Array<{ name: string; category: string; shelfLifeDays: number; storageZone: string }> {
 	const normalized = items
 		.filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
 		.map((item) => {
@@ -90,15 +93,23 @@ function normalizeAnalyzedItems(items: unknown[]): Array<{ name: string; categor
 				item.estimatedShelfLifeDays ??
 				item.shelf_life_days ??
 				item.shelf_life;
+			const category = String(item.category ?? "Other").trim() || "Other";
+			const storageZoneRaw =
+				item.storageZone ??
+				item.storage_zone ??
+				item.storage ??
+				item.storage_location ??
+				item.storageLocation;
 
 			const parsedShelfLife = Number(shelfLifeRaw ?? 0);
 
 			return {
 				name: String(item.name ?? item.item ?? "").trim(),
-				category: String(item.category ?? "Other").trim() || "Other",
+				category,
 				shelfLifeDays: Number.isFinite(parsedShelfLife)
 					? Math.max(0, Math.round(parsedShelfLife))
 					: 0,
+				storageZone: resolveStorageZone(storageZoneRaw, category),
 			};
 		})
 		.filter((item) => item.name.length > 0);
