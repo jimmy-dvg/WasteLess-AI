@@ -126,12 +126,7 @@ type VoiceWindow = Window & {
 
 type CollectionStorageMode = "cloud" | "local";
 
-type SupabaseLikeError = {
-	code?: string;
-	message?: string;
-	details?: string;
-	hint?: string;
-};
+
 
 const TWO_DAYS_IN_MS = 48 * 60 * 60 * 1000;
 const FAVORITES_STORAGE_KEY = "wasteless.favorite-recipes";
@@ -232,8 +227,8 @@ function isMissingRecipeCollectionsTableError(error: unknown): boolean {
 		return false;
 	}
 
-	const code = String((error as SupabaseLikeError).code ?? "");
-	const message = String((error as SupabaseLikeError).message ?? "").toLowerCase();
+	const code = String((error as any)?.code ?? "");
+	const message = String((error as any)?.message ?? "").toLowerCase();
 
 	return (
 		code === "42P01" ||

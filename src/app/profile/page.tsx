@@ -160,9 +160,7 @@ export default function ProfilePage() {
 					}
 				}
 			} catch (err) {
-				// fallthrough to legacy supabase session retrieval
-			}
-
+			} finally {
 				// No shim fallback — if JWT decode didn't work, force login
 				if (isMounted) {
 					setIsAuthenticated(false);
@@ -170,6 +168,7 @@ export default function ProfilePage() {
 					setIsAuthChecking(false);
 					router.replace("/login");
 				}
+			}
 		};
 
 		void initAuth();
