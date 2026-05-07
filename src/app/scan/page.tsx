@@ -6,12 +6,13 @@ import {
 	resolveStorageZone,
 	type StorageZone,
 } from "@/src/lib/storage-zone";
-import { getSupabaseBrowserClient } from "@/src/lib/supabase-browser";
+import { useAuth } from "@/src/lib/use-auth";
 import { AnimatePresence, motion } from "framer-motion";
 import { Camera } from "lucide-react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import getSupabaseBrowserClient from "@/src/lib/supabase-browser";
 
 type DetectedFoodItem = {
 	name: string;

@@ -1,34 +1,30 @@
 "use client";
 
-import { getUserRole } from "@/src/lib/supabase";
-import { getSupabaseBrowserClient } from "@/src/lib/supabase-browser";
+import { useAuth } from "@/src/lib/use-auth";
 import { ShieldCheck } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 export default function AdminDashboardPage() {
 	const router = useRouter();
-	const supabase = useMemo(() => getSupabaseBrowserClient(), []);
+	const { getAuthHeader } = useAuth();
 	const [isCheckingAccess, setIsCheckingAccess] = useState(true);
 	const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
 	useEffect(() => {
 		const checkAccess = async () => {
 			try {
-				const {
-					data: { session },
-				} = await supabase.auth.getSession();
-
-				if (!session?.user) {
-					router.replace("/");
-					return;
-				}
-
-				const role = await getUserRole(session.user.id);
-				if (role !== "admin") {
-					router.replace("/");
-					return;
-				}
+					const res = await fetch('/api/admin/role', { headers: getAuthHeader() as HeadersInit });
+					if (!res.ok) {
+						router.replace('/');
+						return;
+					}
+					const payload = await res.json();
+					const role = payload?.role ?? 'user';
+					if (role !== 'admin') {
+						router.replace('/');
+						return;
+					}
 			} catch (error) {
 				const message = error instanceof Error ? error.message : "Failed to validate admin access.";
 				setErrorMessage(message);
@@ -39,7 +35,7 @@ export default function AdminDashboardPage() {
 		};
 
 		void checkAccess();
-	}, [router, supabase]);
+	}, [router, getAuthHeader]);
 
 	if (isCheckingAccess) {
 		return (

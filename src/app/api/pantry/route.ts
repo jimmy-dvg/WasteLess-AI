@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 
 import { getDrizzleClient } from "@/src/lib/drizzle-client";
 import { pantryItems } from "@/src/lib/drizzle-schema";
-import { getSupabaseServerClient } from "@/src/lib/supabase-server";
+import { getAuthenticatedUser } from "@/src/lib/jwt-auth";
 import { resolveStorageZone } from "@/src/lib/storage-zone";
 
 type PantryItemPayload = {
@@ -24,42 +24,21 @@ type PantryRowSelection = {
 };
 
 function redirectToLogin(request: Request): NextResponse {
-	return NextResponse.redirect(new URL("/login", request.url));
-}
-
-function getBearerToken(request: Request): string | null {
-	const header = request.headers.get("authorization");
-	if (!header) {
-		return null;
-	}
-
-	const [scheme, token] = header.split(" ");
-	if (scheme?.toLowerCase() !== "bearer" || !token) {
-		return null;
-	}
-
-	return token;
+	return NextResponse.json(
+		{ error: "Unauthorized", details: "Authentication is required." },
+		{ status: 401 }
+	);
 }
 
 async function getAuthenticatedContext(
 	request: Request
 ): Promise<{ userId: string } | NextResponse> {
-	const token = getBearerToken(request);
-	if (!token) {
+	const user = await getAuthenticatedUser(request);
+	if (!user) {
 		return redirectToLogin(request);
 	}
 
-	const supabase = getSupabaseServerClient();
-	const {
-		data: { user },
-		error,
-	} = await supabase.auth.getUser(token);
-
-	if (error || !user) {
-		return redirectToLogin(request);
-	}
-
-	return { userId: user.id };
+	return { userId: user.userId };
 }
 
 function toErrorMessage(error: unknown, fallback = "Unknown database error."): string {

@@ -1,5 +1,5 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { getSupabaseServerClient } from "@/src/lib/supabase-server";
+import { getAuthenticatedUser } from "@/src/lib/jwt-auth";
 import { resolveStorageZone } from "@/src/lib/storage-zone";
 import { NextResponse } from "next/server";
 
@@ -21,20 +21,6 @@ const DEV_FALLBACK_ITEMS = [
 	{ name: "Milk", category: "Dairy", shelfLifeDays: 3, storageZone: "fridge" },
 	{ name: "Rice", category: "Pantry", shelfLifeDays: 180, storageZone: "dry_storage" },
 ];
-
-function getBearerToken(request: Request): string | null {
-	const header = request.headers.get("authorization");
-	if (!header) {
-		return null;
-	}
-
-	const [scheme, token] = header.split(" ");
-	if (scheme?.toLowerCase() !== "bearer" || !token) {
-		return null;
-	}
-
-	return token;
-}
 
 function parseJsonArray(raw: string): unknown[] {
 	const trimmed = raw.trim();
@@ -197,21 +183,9 @@ export async function POST(request: Request) {
 			);
 		}
 
-		const token = getBearerToken(request);
-		if (!token) {
-			return NextResponse.json(
-				{ error: "Unauthorized", details: "Authentication is required." },
-				{ status: 401 }
-			);
-		}
 
-		const authClient = getSupabaseServerClient();
-		const {
-			data: { user },
-			error: userError,
-		} = await authClient.auth.getUser(token);
-
-		if (userError || !user) {
+		const user = await getAuthenticatedUser(request);
+		if (!user) {
 			return NextResponse.json(
 				{ error: "Unauthorized", details: "Invalid or expired session." },
 				{ status: 401 }

@@ -1,12 +1,13 @@
 "use client";
 
 import BottomNav from "@/components/BottomNav";
-import { getSupabaseBrowserClient } from "@/src/lib/supabase-browser";
+import { useAuth } from "@/src/lib/use-auth";
 import { AnimatePresence, motion } from "framer-motion";
 import { Bell, Heart, Leaf, Settings2, UserRound } from "lucide-react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import getSupabaseBrowserClient from "@/src/lib/supabase-browser";
 
 type ProfileTab = "favorites" | "settings";
 
@@ -147,9 +148,9 @@ export default function ProfilePage() {
 			}
 
 			setIsAuthenticated(true);
-			setCurrentUserId(session.user.id);
-			setDisplayName(getDisplayName(session.user.email ?? null, session.user.user_metadata));
-			setAvatarUrl(getAvatarUrl(session.user.user_metadata));
+			setCurrentUserId((session as any).user.id);
+			setDisplayName(getDisplayName((session as any).user.email ?? null, (session as any).user.user_metadata));
+			setAvatarUrl(getAvatarUrl((session as any).user.user_metadata));
 			setIsAuthChecking(false);
 		};
 
@@ -170,9 +171,9 @@ export default function ProfilePage() {
 			}
 
 			setIsAuthenticated(true);
-			setCurrentUserId(session.user.id);
-			setDisplayName(getDisplayName(session.user.email ?? null, session.user.user_metadata));
-			setAvatarUrl(getAvatarUrl(session.user.user_metadata));
+			setCurrentUserId((session as any).user.id);
+			setDisplayName(getDisplayName((session as any).user.email ?? null, (session as any).user.user_metadata));
+			setAvatarUrl(getAvatarUrl((session as any).user.user_metadata));
 		});
 
 		return () => {
@@ -251,7 +252,7 @@ export default function ProfilePage() {
 				}
 
 				setFavorites(
-					(favoritesResponse.data ?? []).map((item) => ({
+					(favoritesResponse.data ?? []).map((item: any) => ({
 						id: String(item.id ?? ""),
 						title: String(item.title ?? "").trim(),
 						description: String(item.description ?? "").trim(),
@@ -259,7 +260,7 @@ export default function ProfilePage() {
 						imageUrl: item.image_url ? String(item.image_url) : null,
 						createdAt: String(item.created_at ?? ""),
 					}))
-					.filter((item) => item.id.length > 0 && item.title.length > 0)
+					.filter((item: any) => item.id.length > 0 && item.title.length > 0)
 				);
 
 				setSustainabilityScore(Number(pantryCountResponse.count ?? 0));

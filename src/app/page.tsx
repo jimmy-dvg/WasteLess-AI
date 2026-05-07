@@ -1,7 +1,8 @@
 "use client";
 
 import BottomNav from "@/components/BottomNav";
-import { getSupabaseBrowserClient } from "@/src/lib/supabase-browser";
+import { useAuth } from "@/src/lib/use-auth";
+import getSupabaseBrowserClient from "@/src/lib/supabase-browser";
 import { ChefHat, Clock3, ScanLine, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -72,7 +73,7 @@ async function loadDashboardItems(): Promise<DashboardItem[]> {
 
 	const pantryItems = Array.isArray(pantryResponse.data) ? pantryResponse.data : [];
 	return pantryItems
-		.map((item) => {
+		.map((item: any) => {
 			const createdAt = item.created_at ? String(item.created_at) : "";
 			const shelfLifeDays = Number(item.shelf_life_days ?? 0);
 
@@ -86,8 +87,8 @@ async function loadDashboardItems(): Promise<DashboardItem[]> {
 						: null,
 			};
 		})
-		.filter((item) => item.id.length > 0 && item.name.length > 0)
-		.sort((a, b) => {
+		.filter((item: any) => item.id.length > 0 && item.name.length > 0)
+		.sort((a: any, b: any) => {
 			const aTime = getTimeToExpiryMs(a.expiryDate);
 			const bTime = getTimeToExpiryMs(b.expiryDate);
 

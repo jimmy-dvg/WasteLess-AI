@@ -1,15 +1,13 @@
 "use client";
 
-import { getSupabaseBrowserClient } from "@/src/lib/supabase-browser";
 import { ArrowRight, Sparkles } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useState } from "react";
 
 type AuthMode = "login" | "signup";
 
 export default function LoginPage() {
 	const router = useRouter();
-	const supabase = useMemo(() => getSupabaseBrowserClient(), []);
 
 	const [mode, setMode] = useState<AuthMode>("login");
 	const [email, setEmail] = useState("");
@@ -31,34 +29,37 @@ export default function LoginPage() {
 		try {
 			setIsSubmitting(true);
 
-			if (mode === "login") {
-				const { error } = await supabase.auth.signInWithPassword({
+			const response = await fetch("/api/auth", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					action: mode,
 					email: email.trim(),
 					password,
-				});
-
-				if (error) {
-					throw error;
-				}
-
-				router.push("/");
-				router.refresh();
-				return;
-			}
-
-			const { error } = await supabase.auth.signUp({
-				email: email.trim(),
-				password,
+				}),
 			});
 
-			if (error) {
-				throw error;
+			const data = await response.json();
+
+			if (!response.ok) {
+				throw new Error(data.error || "Authentication failed");
 			}
 
-			setSuccessMessage("Account created. You can now log in.");
-			setMode("login");
-		} catch (error) {
-			const message = error instanceof Error ? error.message : "Authentication failed.";
+			// Store JWT token
+			localStorage.setItem("authToken", data.token);
+
+			if (mode === "signup") {
+				setSuccessMessage("Account created successfully! Redirecting...");
+				setTimeout(() => {
+					router.push("/");
+					router.refresh();
+				}, 1500);
+			} else {
+				router.push("/");
+				router.refresh();
+			}
+		} catch (err) {
+			const message = err instanceof Error ? err.message : "An error occurred";
 			setErrorMessage(message);
 		} finally {
 			setIsSubmitting(false);
@@ -71,7 +72,7 @@ export default function LoginPage() {
 				<div className="flex items-center justify-center">
 					<div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">
 						<Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
-						WastLess AI
+						WasteLess AI
 					</div>
 				</div>
 
@@ -81,7 +82,7 @@ export default function LoginPage() {
 				<p className="mt-2 text-center text-sm text-slate-600">
 					{mode === "login"
 						? "Sign in to manage your food and reduce waste."
-						: "Join WastLess AI and start tracking your pantry."}
+						: "Join WasteLess AI and start tracking your pantry."}
 				</p>
 
 				<form onSubmit={handleSubmit} className="mt-6 space-y-4">
@@ -97,6 +98,8 @@ export default function LoginPage() {
 							onChange={(event) => setEmail(event.target.value)}
 							placeholder="you@example.com"
 							className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+							disabled={isSubmitting}
+							required
 						/>
 					</div>
 
@@ -112,6 +115,8 @@ export default function LoginPage() {
 							onChange={(event) => setPassword(event.target.value)}
 							placeholder="Enter your password"
 							className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+							disabled={isSubmitting}
+							required
 						/>
 					</div>
 
@@ -148,6 +153,12 @@ export default function LoginPage() {
 				>
 					{mode === "login" ? "No account? Switch to Sign Up" : "Already have an account? Switch to Login"}
 				</button>
+
+				<div className="mt-6 pt-6 border-t border-slate-200 text-xs text-slate-600">
+					<p className="font-medium mb-2">Demo Account:</p>
+					<p>Email: <span className="font-mono">demo@example.com</span></p>
+					<p>Password: <span className="font-mono">demo123</span></p>
+				</div>
 			</section>
 		</main>
 	);

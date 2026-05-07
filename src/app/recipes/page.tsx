@@ -1,7 +1,7 @@
 "use client";
 
 import BottomNav from "@/components/BottomNav";
-import { getSupabaseBrowserClient } from "@/src/lib/supabase-browser";
+import { useAuth } from "@/src/lib/use-auth";
 import { AnimatePresence, motion } from "framer-motion";
 import {
 	ChefHat,
@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import getSupabaseBrowserClient from "@/src/lib/supabase-browser";
 
 type IngredientItem = {
 	id: string;
@@ -459,7 +460,7 @@ async function fetchTopExpiryItems(): Promise<IngredientItem[]> {
 
 	const pantryItems = Array.isArray(pantryResponse.data) ? pantryResponse.data : [];
 	return pantryItems
-		.map((item) => {
+		.map((item: any) => {
 			const createdAt = item.created_at ? String(item.created_at) : "";
 			const shelfLifeDays = Number(item.shelf_life_days ?? 0);
 			return {
@@ -472,8 +473,8 @@ async function fetchTopExpiryItems(): Promise<IngredientItem[]> {
 						: null,
 			};
 		})
-		.filter((item) => item.id.length > 0 && item.name.length > 0)
-		.sort((a, b) => {
+		.filter((item: any) => item.id.length > 0 && item.name.length > 0)
+		.sort((a: any, b: any) => {
 			if (!a.expiryDate && !b.expiryDate) {
 				return 0;
 			}
@@ -680,8 +681,8 @@ export default function RecipesPage() {
 				return;
 			}
 
-			setIsAuthenticated(true);
-			setCurrentUserId(session.user.id);
+						setIsAuthenticated(true);
+						setCurrentUserId((session as any).user.id);
 			setIsAuthChecking(false);
 		};
 
@@ -701,8 +702,8 @@ export default function RecipesPage() {
 				return;
 			}
 
-			setIsAuthenticated(true);
-			setCurrentUserId(session.user.id);
+					setIsAuthenticated(true);
+					setCurrentUserId((session as any).user.id);
 		});
 
 		return () => {

@@ -1,5 +1,5 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { getSupabaseServerClient } from "@/src/lib/supabase-server";
+import { getAuthenticatedUser } from "@/src/lib/jwt-auth";
 import { NextResponse } from "next/server";
 
 type AssistantPayload = {
@@ -17,20 +17,6 @@ const DEFAULT_ASSISTANT_MODELS = [
 	"gemini-2.5-flash",
 	"gemini-2.5-flash-latest",
 ];
-
-function getBearerToken(request: Request): string | null {
-	const header = request.headers.get("authorization");
-	if (!header) {
-		return null;
-	}
-
-	const [scheme, token] = header.split(" ");
-	if (scheme?.toLowerCase() !== "bearer" || !token) {
-		return null;
-	}
-
-	return token;
-}
 
 function normalizePayload(input: unknown): AssistantPayload {
 	if (typeof input !== "object" || input === null) {
@@ -162,21 +148,8 @@ function buildFallbackAdvice(note: string): string {
 
 export async function POST(request: Request) {
 	try {
-		const token = getBearerToken(request);
-		if (!token) {
-			return NextResponse.json(
-				{ error: "Unauthorized", details: "Authentication is required." },
-				{ status: 401 }
-			);
-		}
-
-		const authClient = getSupabaseServerClient();
-		const {
-			data: { user },
-			error: userError,
-		} = await authClient.auth.getUser(token);
-
-		if (userError || !user) {
+		const user = await getAuthenticatedUser(request);
+		if (!user) {
 			return NextResponse.json(
 				{ error: "Unauthorized", details: "Invalid or expired session." },
 				{ status: 401 }

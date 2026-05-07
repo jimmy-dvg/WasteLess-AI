@@ -2,6 +2,8 @@ import { bigint, index, integer, numeric, pgTable, text, timestamp, uniqueIndex,
 
 export const profiles = pgTable("profiles", {
 	id: uuid("id").primaryKey(),
+	email: text("email").notNull().unique(),
+	passwordHash: text("password_hash").notNull(),
 	role: text("role").notNull().default("user"),
 	createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

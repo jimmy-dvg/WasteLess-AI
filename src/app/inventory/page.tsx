@@ -7,7 +7,7 @@ import {
 	resolveStorageZone,
 	type StorageZone,
 } from "@/src/lib/storage-zone";
-import { getSupabaseBrowserClient } from "@/src/lib/supabase-browser";
+import { useAuth } from "@/src/lib/use-auth";
 import {
 	AlertTriangle,
 	CalendarDays,
@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import getSupabaseBrowserClient from "@/src/lib/supabase-browser";
 
 type FoodItem = {
 	id: string;
@@ -127,7 +128,7 @@ export default function InventoryPage() {
 		const syncAuthState = async () => {
 			const {
 				data: { session },
-			} = await supabase.auth.getSession();
+			} = (await supabase.auth.getSession()) as any;
 
 			if (!isMounted) {
 				return;
@@ -183,7 +184,7 @@ export default function InventoryPage() {
 
 			const {
 				data: { session },
-			} = await supabase.auth.getSession();
+			} = (await supabase.auth.getSession()) as any;
 
 			if (!session?.access_token) {
 				router.replace("/login");

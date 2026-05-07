@@ -1,33 +1,12 @@
-import { createClient } from "@supabase/supabase-js";
+import { desc, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import type { Database } from "@/src/types/supabase";
-
-type SupabaseLikeError = {
-	code?: string;
-	message?: string;
-	details?: string;
-	hint?: string;
-};
-
-type FavoriteRow = {
-	title?: unknown;
-	description?: unknown;
-	instructions?: unknown;
-	image_url?: unknown;
-	created_at?: unknown;
-};
-
-type NoteRow = {
-	recipe_title?: unknown;
-	note?: unknown;
-};
-
-type ShoppingRow = {
-	recipe_title?: unknown;
-	name?: unknown;
-	amount?: unknown;
-	unit?: unknown;
-};
+import { getDrizzleClient } from "@/src/lib/drizzle-client";
+import {
+	favoriteRecipes,
+	recipeNotes,
+	shoppingListItems,
+} from "@/src/lib/drizzle-schema";
+import { getAuthenticatedUser } from "@/src/lib/jwt-auth";
 
 type CollectionsResponse = {
 	favorites: Array<{
@@ -66,55 +45,14 @@ function getBearerToken(request: Request): string | null {
 	return token;
 }
 
-function getSupabaseUserClient(token: string) {
-	const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-	const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY;
-
-	if (!url) {
-		throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL environment variable.");
-	}
-
-	if (!publishableKey) {
-		throw new Error("Missing NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY environment variable.");
-	}
-
-	return createClient<Database>(url, publishableKey, {
-		auth: {
-			persistSession: false,
-			autoRefreshToken: false,
-		},
-		global: {
-			headers: {
-				Authorization: `Bearer ${token}`,
-			},
-		},
-	});
-}
-
-function isMissingTableError(error: unknown): boolean {
-	if (typeof error !== "object" || error === null) {
-		return false;
-	}
-
-	const code = String((error as SupabaseLikeError).code ?? "");
-	const message = String((error as SupabaseLikeError).message ?? "").toLowerCase();
-
-	return code === "42P01" || message.includes("does not exist") || message.includes("schema cache");
-}
-
 function toErrorMessage(error: unknown): string {
-	if (typeof error === "object" && error !== null) {
-		const message = String((error as SupabaseLikeError).message ?? "").trim();
-		const details = String((error as SupabaseLikeError).details ?? "").trim();
-		const hint = String((error as SupabaseLikeError).hint ?? "").trim();
-		const combined = [message, details, hint].filter((part) => part.length > 0).join(" ").trim();
-		if (combined.length > 0) {
-			return combined;
-		}
+	if (error instanceof Error) {
+		return error.message;
 	}
 
-	if (error instanceof Error && error.message) {
-		return error.message;
+	if (typeof error === "object" && error !== null) {
+		const msg = String((error as Record<string, unknown>).message ?? "").trim();
+		if (msg) return msg;
 	}
 
 	return "Unknown database error.";
@@ -128,27 +66,15 @@ function appendWarning(warnings: string[], nextWarning: string) {
 
 export async function GET(request: Request) {
 	try {
-		const token = getBearerToken(request);
-		if (!token) {
-			return NextResponse.json(
-				{ error: "Unauthorized", details: "Authentication is required." },
-				{ status: 401 }
-			);
-		}
-
-		const supabase = getSupabaseUserClient(token);
-		const {
-			data: { user },
-			error: userError,
-		} = await supabase.auth.getUser();
-
-		if (userError || !user) {
+		const user = await getAuthenticatedUser(request);
+		if (!user) {
 			return NextResponse.json(
 				{ error: "Unauthorized", details: "Invalid or expired session." },
 				{ status: 401 }
 			);
 		}
 
+		const db = getDrizzleClient();
 		const response: CollectionsResponse = {
 			favorites: [],
 			notes: {},
@@ -162,78 +88,59 @@ export async function GET(request: Request) {
 
 		const warnings: string[] = [];
 
-		const favoritesResult = await supabase
-			.from("favorite_recipes")
-			.select("title, description, instructions, image_url, created_at")
-			.order("created_at", { ascending: false });
+		try {
+			const favItems = await db
+				.select()
+				.from(favoriteRecipes)
+				.where(eq(favoriteRecipes.userId, user.userId))
+				.orderBy(desc(favoriteRecipes.createdAt))
+				.limit(50);
 
-		if (favoritesResult.error) {
-			if (isMissingTableError(favoritesResult.error)) {
-				appendWarning(warnings, "Favorites table is missing. Using local mode.");
-			} else {
-				appendWarning(warnings, `Favorites cloud disabled: ${toErrorMessage(favoritesResult.error)}`);
-			}
-		} else {
 			response.capabilities.favorites = true;
-			response.favorites = (favoritesResult.data ?? [])
-				.map((item) => {
-					const row = item as FavoriteRow;
-					return {
-						title: String(row.title ?? "").trim(),
-						description: String(row.description ?? "").trim(),
-						instructions: String(row.instructions ?? "").trim(),
-						imageUrl: row.image_url ? String(row.image_url) : null,
-						createdAt: String(row.created_at ?? ""),
-					};
-				})
-				.filter((item) => item.title.length > 0);
+			response.favorites = favItems.map((item) => ({
+				title: item.title.trim(),
+				description: item.description.trim(),
+				instructions: item.instructions.trim(),
+				imageUrl: item.imageUrl ?? null,
+				createdAt: item.createdAt.toISOString(),
+			}));
+		} catch (error) {
+			appendWarning(warnings, `Favorites disabled: ${toErrorMessage(error)}`);
 		}
 
-		const notesResult = await supabase
-			.from("recipe_notes")
-			.select("recipe_title, note")
-			.order("updated_at", { ascending: false });
+		try {
+			const noteItems = await db
+				.select()
+				.from(recipeNotes)
+				.where(eq(recipeNotes.userId, user.userId))
+				.orderBy(desc(recipeNotes.updatedAt))
+				.limit(500);
 
-		if (notesResult.error) {
-			if (isMissingTableError(notesResult.error)) {
-				appendWarning(warnings, "Notes table is missing. Notes remain local.");
-			} else {
-				appendWarning(warnings, `Notes cloud disabled: ${toErrorMessage(notesResult.error)}`);
-			}
-		} else {
 			response.capabilities.notes = true;
 			response.notes = Object.fromEntries(
-				(notesResult.data ?? []).map((item) => {
-					const row = item as NoteRow;
-					return [String(row.recipe_title ?? ""), String(row.note ?? "")];
-				})
+				noteItems.map((item) => [item.recipeTitle, item.note])
 			);
+		} catch (error) {
+			appendWarning(warnings, `Notes disabled: ${toErrorMessage(error)}`);
 		}
 
-		const shoppingResult = await supabase
-			.from("shopping_list_items")
-			.select("recipe_title, name, amount, unit")
-			.order("created_at", { ascending: false });
+		try {
+			const shoppingItems = await db
+				.select()
+				.from(shoppingListItems)
+				.where(eq(shoppingListItems.userId, user.userId))
+				.orderBy(desc(shoppingListItems.createdAt))
+				.limit(500);
 
-		if (shoppingResult.error) {
-			if (isMissingTableError(shoppingResult.error)) {
-				appendWarning(warnings, "Shopping table is missing. Shopping list remains local.");
-			} else {
-				appendWarning(warnings, `Shopping cloud disabled: ${toErrorMessage(shoppingResult.error)}`);
-			}
-		} else {
 			response.capabilities.shopping = true;
-			response.shopping = (shoppingResult.data ?? [])
-				.map((item) => {
-					const row = item as ShoppingRow;
-					return {
-						recipeTitle: String(row.recipe_title ?? "").trim(),
-						name: String(row.name ?? "").trim(),
-						amount: Number(row.amount ?? 0),
-						unit: String(row.unit ?? "pcs").trim() || "pcs",
-					};
-				})
-				.filter((item) => item.name.length > 0);
+			response.shopping = shoppingItems.map((item) => ({
+				recipeTitle: item.recipeTitle.trim(),
+				name: item.name.trim(),
+				amount: Number(item.amount),
+				unit: item.unit.trim() || "pcs",
+			}));
+		} catch (error) {
+			appendWarning(warnings, `Shopping disabled: ${toErrorMessage(error)}`);
 		}
 
 		if (warnings.length > 0) {
@@ -242,7 +149,7 @@ export async function GET(request: Request) {
 
 		return NextResponse.json(response);
 	} catch (error) {
-		const details = toErrorMessage(error);
+		const details = error instanceof Error ? error.message : "Unknown error.";
 		return NextResponse.json(
 			{ error: "Failed to load recipe collections.", details },
 			{ status: 500 }
