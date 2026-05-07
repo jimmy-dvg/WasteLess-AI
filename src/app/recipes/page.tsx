@@ -612,6 +612,7 @@ function normalizeRecipeArray(data: unknown): Recipe[] {
 export default function RecipesPage() {
 	const router = useRouter();
 	const supabase = useMemo(() => getSupabaseBrowserClient(), []);
+	const { session: authSession, isLoading: isAuthLoading, getAuthHeader } = useAuth();
 	const [isAuthChecking, setIsAuthChecking] = useState(true);
 	const [isAuthenticated, setIsAuthenticated] = useState(false);
 	const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -664,51 +665,27 @@ export default function RecipesPage() {
 	useEffect(() => {
 		let isMounted = true;
 
-		const syncAuthState = async () => {
-			const {
-				data: { session },
-			} = await supabase.auth.getSession();
-
-			if (!isMounted) {
+		const initAuth = async () => {
+			if (isAuthLoading) return;
+			if (!authSession?.isAuthenticated) {
+				if (isMounted) {
+					setIsAuthenticated(false);
+					setIsAuthChecking(false);
+					router.replace("/login");
+				}
 				return;
 			}
 
-			if (!session?.access_token) {
-				setIsAuthenticated(false);
-				setCurrentUserId(null);
+			if (isMounted) {
+				setIsAuthenticated(true);
 				setIsAuthChecking(false);
-				router.replace("/login");
-				return;
 			}
-
-						setIsAuthenticated(true);
-						setCurrentUserId((session as any).user.id);
-			setIsAuthChecking(false);
 		};
 
-		void syncAuthState();
-
-		const {
-			data: { subscription },
-		} = supabase.auth.onAuthStateChange((_event, session) => {
-			if (!isMounted) {
-				return;
-			}
-
-			if (!session?.access_token) {
-				setIsAuthenticated(false);
-				setCurrentUserId(null);
-				router.replace("/login");
-				return;
-			}
-
-					setIsAuthenticated(true);
-					setCurrentUserId((session as any).user.id);
-		});
+		void initAuth();
 
 		return () => {
 			isMounted = false;
-			subscription.unsubscribe();
 		};
 	}, [router, supabase]);
 
@@ -783,20 +760,15 @@ export default function RecipesPage() {
 			setCollectionStorageMode("local");
 
 			try {
-				const {
-					data: { session },
-				} = await supabase.auth.getSession();
-
-				if (!session?.access_token) {
+				const headers = getAuthHeader();
+				if (!headers.Authorization && !headers.authorization) {
 					router.replace("/login");
 					return;
 				}
 
 				const response = await fetch("/api/recipes/collections", {
 					method: "GET",
-					headers: {
-						Authorization: `Bearer ${session.access_token}`,
-					},
+					headers,
 				});
 
 				const payload: unknown = await response.json();
@@ -1054,11 +1026,9 @@ export default function RecipesPage() {
 			throw new Error("No ingredients available yet. Scan food items first.");
 		}
 
-		const {
-			data: { session },
-		} = await supabase.auth.getSession();
+		const headers = getAuthHeader();
 
-		if (!session?.access_token) {
+		if (!headers.Authorization && !headers.authorization) {
 			router.replace("/login");
 			throw new Error("Please log in to generate recipes.");
 		}
@@ -1070,10 +1040,7 @@ export default function RecipesPage() {
 
 		const response = await fetch("/api/recipes", {
 			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				Authorization: `Bearer ${session.access_token}`,
-			},
+			headers: { "Content-Type": "application/json", ...headers },
 			body: JSON.stringify(payload),
 		});
 
@@ -1320,11 +1287,9 @@ export default function RecipesPage() {
 				return;
 			}
 
-			const {
-				data: { session },
-			} = await supabase.auth.getSession();
+			const headers = getAuthHeader();
 
-			if (!session?.access_token) {
+			if (!headers.Authorization && !headers.authorization) {
 				router.replace("/login");
 				return;
 			}
@@ -1338,10 +1303,7 @@ export default function RecipesPage() {
 
 				const response = await fetch("/api/recipes/assistant", {
 					method: "POST",
-					headers: {
-						"Content-Type": "application/json",
-						Authorization: `Bearer ${session.access_token}`,
-					},
+					headers: { "Content-Type": "application/json", ...headers },
 					body: JSON.stringify({
 						recipeTitle: recipe.title,
 						note,

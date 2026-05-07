@@ -40,6 +40,7 @@ function fileToBase64(file: File): Promise<string> {
 export default function ScanPage() {
 	const router = useRouter();
 	const supabase = useMemo(() => getSupabaseBrowserClient(), []);
+	const { session: authSession, isLoading: isAuthLoading, getAuthHeader } = useAuth();
 	const [isAuthChecking, setIsAuthChecking] = useState(true);
 	const [isAuthenticated, setIsAuthenticated] = useState(false);
 	const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -53,49 +54,29 @@ export default function ScanPage() {
 	useEffect(() => {
 		let isMounted = true;
 
-		const syncAuthState = async () => {
-			const {
-				data: { session },
-			} = await supabase.auth.getSession();
-
-			if (!isMounted) {
+		const initAuth = async () => {
+			if (isAuthLoading) return;
+			if (!authSession?.isAuthenticated) {
+				if (isMounted) {
+					setIsAuthenticated(false);
+					setIsAuthChecking(false);
+					router.replace("/login");
+				}
 				return;
 			}
 
-			if (!session?.access_token) {
-				setIsAuthenticated(false);
+			if (isMounted) {
+				setIsAuthenticated(true);
 				setIsAuthChecking(false);
-				router.replace("/login");
-				return;
 			}
-
-			setIsAuthenticated(true);
-			setIsAuthChecking(false);
 		};
 
-		void syncAuthState();
-
-		const {
-			data: { subscription },
-		} = supabase.auth.onAuthStateChange((_event, session) => {
-			if (!isMounted) {
-				return;
-			}
-
-			if (!session?.access_token) {
-				setIsAuthenticated(false);
-				router.replace("/login");
-				return;
-			}
-
-			setIsAuthenticated(true);
-		});
+		void initAuth();
 
 		return () => {
 			isMounted = false;
-			subscription.unsubscribe();
 		};
-	}, [router, supabase]);
+	}, [router, supabase, authSession, isAuthLoading]);
 
 	useEffect(() => {
 		if (!selectedFile) {
@@ -129,23 +110,17 @@ export default function ScanPage() {
 		setInfoMessage(null);
 
 		try {
-			const {
-				data: { session },
-			} = await supabase.auth.getSession();
+			const imageBase64 = await fileToBase64(selectedFile);
+			const authHeaders = getAuthHeader();
 
-			if (!session?.access_token) {
+			if (!authHeaders.Authorization && !authHeaders.authorization) {
 				router.replace("/login");
 				throw new Error("Please log in to scan and save food items.");
 			}
 
-			const imageBase64 = await fileToBase64(selectedFile);
-
 			const response = await fetch("/api/analyze", {
 				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-					Authorization: `Bearer ${session.access_token}`,
-				},
+				headers: { "Content-Type": "application/json", ...authHeaders },
 				body: JSON.stringify({ imageBase64 }),
 			});
 
@@ -203,10 +178,7 @@ export default function ScanPage() {
 
 			const saveResponse = await fetch("/api/pantry", {
 				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-					Authorization: `Bearer ${session.access_token}`,
-				},
+				headers: { "Content-Type": "application/json", ...getAuthHeader() },
 				body: JSON.stringify(pantryPayload),
 			});
 

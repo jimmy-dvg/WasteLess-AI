@@ -112,6 +112,7 @@ function isMissingFavoriteRecipesTable(errorCode: string): boolean {
 export default function ProfilePage() {
 	const router = useRouter();
 	const supabase = useMemo(() => getSupabaseBrowserClient(), []);
+	const { session: authSession, isLoading: isAuthLoading, getAuthHeader } = useAuth();
 
 	const [isAuthChecking, setIsAuthChecking] = useState(true);
 	const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -130,57 +131,73 @@ export default function ProfilePage() {
 	useEffect(() => {
 		let isMounted = true;
 
-		const syncAuthState = async () => {
-			const {
-				data: { session },
-			} = await supabase.auth.getSession();
+		const initAuth = async () => {
+			if (isAuthLoading) return;
 
-			if (!isMounted) {
+			if (!authSession?.isAuthenticated) {
+				if (isMounted) {
+					setIsAuthenticated(false);
+					setCurrentUserId(null);
+					setIsAuthChecking(false);
+					router.replace("/login");
+				}
 				return;
 			}
 
-			if (!session?.access_token) {
-				setIsAuthenticated(false);
-				setCurrentUserId(null);
+			// Try to decode token to extract user id/email
+			try {
+				const token = authSession.token;
+				if (token) {
+					const parts = token.split(".");
+					if (parts.length >= 2) {
+						const payload = JSON.parse(atob(parts[1]));
+						if (isMounted) {
+							setIsAuthenticated(true);
+							setCurrentUserId(String(payload.userId ?? payload.user_id ?? ""));
+							setDisplayName(getDisplayName(String(payload.email ?? null), null));
+							setAvatarUrl(null);
+							setIsAuthChecking(false);
+						}
+						return;
+					}
+				}
+			} catch (err) {
+				// fallthrough to legacy supabase session retrieval
+			}
+
+			// Fallback: try to read session from supabase shim
+			try {
+				const { data: { session } } = await supabase.auth.getSession();
+				if (!isMounted) return;
+				if (!session?.access_token) {
+					setIsAuthenticated(false);
+					setCurrentUserId(null);
+					setIsAuthChecking(false);
+					router.replace("/login");
+					return;
+				}
+
+				setIsAuthenticated(true);
+				setCurrentUserId((session as any).user.id);
+				setDisplayName(getDisplayName((session as any).user.email ?? null, (session as any).user.user_metadata));
+				setAvatarUrl(getAvatarUrl((session as any).user.user_metadata));
 				setIsAuthChecking(false);
-				router.replace("/login");
-				return;
+			} catch (err) {
+				if (isMounted) {
+					setIsAuthenticated(false);
+					setCurrentUserId(null);
+					setIsAuthChecking(false);
+					router.replace("/login");
+				}
 			}
-
-			setIsAuthenticated(true);
-			setCurrentUserId((session as any).user.id);
-			setDisplayName(getDisplayName((session as any).user.email ?? null, (session as any).user.user_metadata));
-			setAvatarUrl(getAvatarUrl((session as any).user.user_metadata));
-			setIsAuthChecking(false);
 		};
 
-		void syncAuthState();
-
-		const {
-			data: { subscription },
-		} = supabase.auth.onAuthStateChange((_event, session) => {
-			if (!isMounted) {
-				return;
-			}
-
-			if (!session?.access_token) {
-				setIsAuthenticated(false);
-				setCurrentUserId(null);
-				router.replace("/login");
-				return;
-			}
-
-			setIsAuthenticated(true);
-			setCurrentUserId((session as any).user.id);
-			setDisplayName(getDisplayName((session as any).user.email ?? null, (session as any).user.user_metadata));
-			setAvatarUrl(getAvatarUrl((session as any).user.user_metadata));
-		});
+		void initAuth();
 
 		return () => {
 			isMounted = false;
-			subscription.unsubscribe();
 		};
-	}, [router, supabase]);
+	}, [router, supabase, authSession, isAuthLoading]);
 
 	useEffect(() => {
 		if (typeof window === "undefined") {
