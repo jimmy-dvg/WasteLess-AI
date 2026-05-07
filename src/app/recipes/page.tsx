@@ -919,26 +919,29 @@ export default function RecipesPage() {
 		let isCancelled = false;
 
 		const syncFavoritesToCloud = async () => {
-			const deleteResponse = await supabase.from("favorite_recipes").delete().eq("user_id", currentUserId);
-			if (deleteResponse.error) {
-				throw deleteResponse.error;
-			}
+			const headers = getAuthHeader();
 
-			const rows = Array.from(favoriteRecipes).map((recipeTitle) => ({
-				user_id: currentUserId,
-				title: recipeTitle,
-				description: favoriteRecipePayloads[recipeTitle]?.description ?? "",
-				instructions: favoriteRecipePayloads[recipeTitle]?.instructions ?? "",
-				image_url: favoriteRecipePayloads[recipeTitle]?.imageUrl ?? null,
-			}));
-
-			if (rows.length === 0) {
+			if (!headers.Authorization && !headers.authorization) {
+				router.replace("/login");
 				return;
 			}
 
-			const insertResponse = await supabase.from("favorite_recipes").insert(rows);
-			if (insertResponse.error) {
-				throw insertResponse.error;
+			const rows = Array.from(favoriteRecipes).map((recipeTitle) => ({
+				title: recipeTitle,
+				description: favoriteRecipePayloads[recipeTitle]?.description ?? "",
+				instructions: favoriteRecipePayloads[recipeTitle]?.instructions ?? "",
+				imageUrl: favoriteRecipePayloads[recipeTitle]?.imageUrl ?? null,
+			}));
+
+			const response = await fetch("/api/recipes/collections", {
+				method: "POST",
+				headers: { "Content-Type": "application/json", ...headers },
+				body: JSON.stringify({ action: "syncFavorites", rows }),
+			});
+
+			if (!response.ok) {
+				const payload = await response.json().catch(() => ({}));
+				throw new Error(String(payload?.details ?? "Failed to sync favorites."));
 			}
 		};
 
@@ -979,26 +982,29 @@ export default function RecipesPage() {
 		let isCancelled = false;
 
 		const syncShoppingListToCloud = async () => {
-			const deleteResponse = await supabase.from("shopping_list_items").delete().eq("user_id", currentUserId);
-			if (deleteResponse.error) {
-				throw deleteResponse.error;
+			const headers = getAuthHeader();
+
+			if (!headers.Authorization && !headers.authorization) {
+				router.replace("/login");
+				return;
 			}
 
 			const rows = shoppingList.map((item) => ({
-				user_id: currentUserId,
-				recipe_title: item.recipeTitle,
+				recipeTitle: item.recipeTitle,
 				name: item.name,
 				amount: Number.isFinite(item.amount) ? item.amount : 0,
 				unit: item.unit,
 			}));
 
-			if (rows.length === 0) {
-				return;
-			}
+			const response = await fetch("/api/recipes/collections", {
+				method: "POST",
+				headers: { "Content-Type": "application/json", ...headers },
+				body: JSON.stringify({ action: "syncShopping", rows }),
+			});
 
-			const insertResponse = await supabase.from("shopping_list_items").insert(rows);
-			if (insertResponse.error) {
-				throw insertResponse.error;
+			if (!response.ok) {
+				const payload = await response.json().catch(() => ({}));
+				throw new Error(String(payload?.details ?? "Failed to sync shopping list."));
 			}
 		};
 
@@ -1255,18 +1261,22 @@ export default function RecipesPage() {
 				return;
 			}
 
-			const upsertResponse = await supabase.from("recipe_notes").upsert(
-				{
-					user_id: currentUserId,
-					recipe_title: recipeTitle,
-					note,
-					updated_at: new Date().toISOString(),
-				},
-				{ onConflict: "user_id,recipe_title" }
-			);
+			const headers = getAuthHeader();
 
-			if (upsertResponse.error) {
-				throw upsertResponse.error;
+			if (!headers.Authorization && !headers.authorization) {
+				router.replace("/login");
+				return;
+			}
+
+			const response = await fetch("/api/recipes/collections", {
+				method: "POST",
+				headers: { "Content-Type": "application/json", ...headers },
+				body: JSON.stringify({ action: "upsertNote", note: { recipeTitle, note } }),
+			});
+
+			if (!response.ok) {
+				const payload = await response.json().catch(() => ({}));
+				throw new Error(String(payload?.details ?? "Failed to save note."));
 			}
 		} catch (error) {
 			if (isMissingRecipeCollectionsTableError(error)) {

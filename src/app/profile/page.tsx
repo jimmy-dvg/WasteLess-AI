@@ -245,61 +245,57 @@ export default function ProfilePage() {
 			setErrorMessage(null);
 
 			try {
-				const [favoritesResponse, pantryCountResponse] = await Promise.all([
-					supabase
-						.from("favorite_recipes")
-						.select("id, title, description, instructions, image_url, created_at")
-						.order("created_at", { ascending: false }),
-					supabase.from("pantry_items").select("id", { count: "exact", head: true }),
+				const headers = getAuthHeader();
+				if (!headers.Authorization && !headers.authorization) {
+					router.replace("/login");
+					return;
+				}
+
+				const [collectionsRes, pantryRes] = await Promise.all([
+					fetch("/api/recipes/collections", { headers }),
+					fetch("/api/pantry", { headers }),
 				]);
 
-				if (favoritesResponse.error) {
-					if (isMissingFavoriteRecipesTable(String(favoritesResponse.error.code ?? ""))) {
-						throw new Error("FAVORITE_RECIPES_TABLE_MISSING");
-					}
-					throw favoritesResponse.error;
+				if (!collectionsRes.ok) {
+					const payload = await collectionsRes.json().catch(() => ({}));
+					throw new Error(String(payload?.details ?? "Failed to load favorites."));
 				}
 
-				if (pantryCountResponse.error) {
-					throw pantryCountResponse.error;
+				if (!pantryRes.ok) {
+					const payload = await pantryRes.json().catch(() => ({}));
+					throw new Error(String(payload?.details ?? "Failed to load pantry count."));
 				}
 
-				if (isCancelled) {
-					return;
-				}
+				const collections = (await collectionsRes.json()) as any;
+				const pantryData = (await pantryRes.json()) as any;
+
+				if (isCancelled) return;
 
 				setFavorites(
-					(favoritesResponse.data ?? []).map((item: any) => ({
-						id: String(item.id ?? ""),
-						title: String(item.title ?? "").trim(),
-						description: String(item.description ?? "").trim(),
-						instructions: String(item.instructions ?? "").trim(),
-						imageUrl: item.image_url ? String(item.image_url) : null,
-						createdAt: String(item.created_at ?? ""),
-					}))
-					.filter((item: any) => item.id.length > 0 && item.title.length > 0)
+					Array.isArray(collections.favorites)
+						? collections.favorites
+							.map((item: any) => ({
+								id: String(item.id ?? ""),
+								title: String(item.title ?? "").trim(),
+								description: String(item.description ?? "").trim(),
+								instructions: String(item.instructions ?? "").trim(),
+								imageUrl: item.imageUrl ? String(item.imageUrl) : null,
+								createdAt: String(item.createdAt ?? ""),
+							}))
+							.filter((it: any) => it.title.length > 0)
+						: []
 				);
 
-				setSustainabilityScore(Number(pantryCountResponse.count ?? 0));
-			} catch (error) {
-				if (isCancelled) {
-					return;
-				}
+				setSustainabilityScore(Array.isArray(pantryData) ? pantryData.length : Number(pantryData?.length ?? 0));
 
-				if (error instanceof Error && error.message === "FAVORITE_RECIPES_TABLE_MISSING") {
-					setFavorites([]);
-					setErrorMessage(
-						"Favorites table is missing in Supabase. Apply sql/20260331_favorite_recipes.sql to enable cloud favorites."
-					);
-				} else if (error instanceof Error) {
-					setErrorMessage(error.message || "Could not load profile data.");
-				} else {
-					setErrorMessage("Could not load profile data.");
+				if (collections.warning) {
+					setErrorMessage(String(collections.warning));
 				}
+			} catch (error) {
+				if (isCancelled) return;
+				setErrorMessage(error instanceof Error ? error.message : String(error ?? "Could not load profile data."));
 			} finally {
-				if (!isCancelled) {
-					setIsLoadingFavorites(false);
-				}
+				if (!isCancelled) setIsLoadingFavorites(false);
 			}
 		};
 

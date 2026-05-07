@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, and } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { getDrizzleClient } from "@/src/lib/drizzle-client";
 import {
@@ -154,5 +154,85 @@ export async function GET(request: Request) {
 			{ error: "Failed to load recipe collections.", details },
 			{ status: 500 }
 		);
+	}
+}
+
+export async function POST(request: Request) {
+	try {
+		const user = await getAuthenticatedUser(request);
+		if (!user) {
+			return NextResponse.json({ error: 'Unauthorized', details: 'Invalid or expired session.' }, { status: 401 });
+		}
+
+		const payload = await request.json().catch(() => ({} as any));
+		const action = String(payload.action ?? '').trim();
+		const db = getDrizzleClient();
+
+		if (action === 'syncFavorites') {
+			const rows = Array.isArray(payload.rows) ? payload.rows : [];
+			// Replace favorites for the user
+			await db.delete(favoriteRecipes).where(eq(favoriteRecipes.userId, user.userId));
+
+			if (rows.length === 0) {
+				return NextResponse.json({ inserted: 0 });
+			}
+
+			const inserts = rows.map((r: any) => ({
+				userId: user.userId,
+				title: String(r.title ?? '').trim(),
+				description: String(r.description ?? '').trim(),
+				instructions: String(r.instructions ?? '').trim(),
+				imageUrl: r.imageUrl ?? null,
+			}));
+
+			await db.insert(favoriteRecipes).values(inserts);
+			return NextResponse.json({ inserted: inserts.length });
+		}
+
+		if (action === 'syncShopping') {
+			const rows = Array.isArray(payload.rows) ? payload.rows : [];
+			await db.delete(shoppingListItems).where(eq(shoppingListItems.userId, user.userId));
+
+			if (rows.length === 0) {
+				return NextResponse.json({ inserted: 0 });
+			}
+
+			const inserts = rows.map((r: any) => ({
+				userId: user.userId,
+				recipeTitle: String(r.recipeTitle ?? '').trim(),
+				name: String(r.name ?? '').trim(),
+				amount: Number(r.amount ?? 0),
+				unit: String(r.unit ?? 'pcs').trim() || 'pcs',
+			}));
+
+			await db.insert(shoppingListItems).values(inserts);
+			return NextResponse.json({ inserted: inserts.length });
+		}
+
+		if (action === 'upsertNote') {
+			const noteEntry = payload.note ?? null;
+			if (!noteEntry || typeof noteEntry !== 'object') {
+				return NextResponse.json({ error: 'BadRequest', details: 'Missing note payload' }, { status: 400 });
+			}
+
+			const recipeTitle = String(noteEntry.recipeTitle ?? '').trim();
+			const note = String(noteEntry.note ?? '').trim();
+
+			if (!recipeTitle) {
+				return NextResponse.json({ error: 'BadRequest', details: 'Missing recipeTitle' }, { status: 400 });
+			}
+
+			// Delete existing and insert new (simple upsert)
+			await db.delete(recipeNotes).where(
+				and(eq(recipeNotes.userId, user.userId), eq(recipeNotes.recipeTitle, recipeTitle))
+			);
+			await db.insert(recipeNotes).values({ userId: user.userId, recipeTitle, note, updatedAt: new Date() });
+			return NextResponse.json({ upserted: 1 });
+		}
+
+		return NextResponse.json({ error: 'BadRequest', details: 'Unknown action' }, { status: 400 });
+	} catch (error) {
+		const details = error instanceof Error ? error.message : 'Unknown error.';
+		return NextResponse.json({ error: 'Failed to execute action', details }, { status: 500 });
 	}
 }
