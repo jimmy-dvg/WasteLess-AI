@@ -2,7 +2,6 @@
 
 import BottomNav from "@/components/BottomNav";
 import { useAuth } from "@/src/lib/use-auth";
-import getSupabaseBrowserClient from "@/src/lib/supabase-browser";
 import { ChefHat, Clock3, ScanLine, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -60,59 +59,48 @@ function formatUrgencyLabel(expiryDate: string | null): string {
 	return `Expires in ${daysLeft} day${daysLeft === 1 ? "" : "s"}`;
 }
 
-async function loadDashboardItems(): Promise<DashboardItem[]> {
-	const supabase = getSupabaseBrowserClient();
-	const pantryResponse = await supabase
-		.from("pantry_items")
-		.select("id, name, shelf_life_days, created_at")
-		.order("created_at", { ascending: false });
-
-	if (pantryResponse.error) {
-		throw pantryResponse.error;
+async function loadDashboardItems(headers: Record<string, string>): Promise<DashboardItem[]> {
+	const res = await fetch('/api/pantry', { headers });
+	if (!res.ok) {
+		const payload = await res.json().catch(() => ({}));
+		throw payload?.details ?? 'Failed to load pantry items';
 	}
 
-	const pantryItems = Array.isArray(pantryResponse.data) ? pantryResponse.data : [];
-	return pantryItems
-		.map((item: any) => {
-			const createdAt = item.created_at ? String(item.created_at) : "";
-			const shelfLifeDays = Number(item.shelf_life_days ?? 0);
+	const pantryItems = await res.json();
+	return Array.isArray(pantryItems)
+		? pantryItems
+			  .map((item: any) => {
+				  const createdAt = item.createdAt ? String(item.createdAt) : String(item.created_at ?? "");
+				  const shelfLifeDays = Number(item.shelfLifeDays ?? item.shelf_life_days ?? 0);
 
-			return {
-				id: String(item.id ?? ""),
-				name: String(item.name ?? "").trim(),
-				quantity: null,
-				expiryDate:
-					createdAt.length > 0 && Number.isFinite(shelfLifeDays)
-						? addDays(createdAt, Math.max(0, Math.round(shelfLifeDays)))
-						: null,
-			};
-		})
-		.filter((item: any) => item.id.length > 0 && item.name.length > 0)
-		.sort((a: any, b: any) => {
-			const aTime = getTimeToExpiryMs(a.expiryDate);
-			const bTime = getTimeToExpiryMs(b.expiryDate);
+				  return {
+					  id: String(item.id ?? ""),
+					  name: String(item.name ?? "").trim(),
+					  quantity: null,
+					  expiryDate:
+						  createdAt.length > 0 && Number.isFinite(shelfLifeDays)
+							  ? addDays(createdAt, Math.max(0, Math.round(shelfLifeDays)))
+							  : null,
+				  };
+			  })
+			  .filter((it: any) => it.id.length > 0 && it.name.length > 0)
+			  .sort((a: any, b: any) => {
+				  const aTime = getTimeToExpiryMs(a.expiryDate);
+				  const bTime = getTimeToExpiryMs(b.expiryDate);
 
-			if (aTime === null && bTime === null) {
-				return 0;
-			}
-			if (aTime === null) {
-				return 1;
-			}
-			if (bTime === null) {
-				return -1;
-			}
-
-			return aTime - bTime;
-		});
+				  if (aTime === null && bTime === null) return 0;
+				  if (aTime === null) return 1;
+				  if (bTime === null) return -1;
+				  return aTime - bTime;
+			  })
+		: [];
 }
 
 export default function Home() {
 	const router = useRouter();
-	const supabase = useMemo(() => getSupabaseBrowserClient(), []);
+	const { session, isLoading: isAuthLoading, getAuthHeader, logout } = useAuth();
 	const [items, setItems] = useState<DashboardItem[]>([]);
 	const [isLoading, setIsLoading] = useState(true);
-	const [isAuthLoading, setIsAuthLoading] = useState(true);
-	const [isAuthenticated, setIsAuthenticated] = useState(false);
 	const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
 	useEffect(() => {
@@ -120,7 +108,8 @@ export default function Home() {
 			try {
 				setIsLoading(true);
 				setErrorMessage(null);
-				const result = await loadDashboardItems();
+				const headers = getAuthHeader();
+				const result = await loadDashboardItems(headers);
 				setItems(result);
 			} catch (error) {
 				const message = error instanceof Error ? error.message : "Failed to load dashboard data.";
@@ -131,32 +120,14 @@ export default function Home() {
 		};
 
 		void fetchItems();
-	}, []);
+	}, [getAuthHeader]);
 
 	useEffect(() => {
-		const syncAuthState = async () => {
-			const {
-				data: { session },
-			} = await supabase.auth.getSession();
-			setIsAuthenticated(Boolean(session?.user));
-			setIsAuthLoading(false);
-		};
-
-		void syncAuthState();
-
-		const {
-			data: { subscription },
-		} = supabase.auth.onAuthStateChange((_event, session) => {
-			setIsAuthenticated(Boolean(session?.user));
-		});
-
-		return () => {
-			subscription.unsubscribe();
-		};
-	}, [supabase]);
+		// `useAuth` manages session state and redirects. Nothing needed here.
+	}, [session, isAuthLoading]);
 
 	const handleLogout = async () => {
-		await supabase.auth.signOut();
+		logout();
 		router.push("/login");
 		router.refresh();
 	};
@@ -202,7 +173,7 @@ export default function Home() {
 						<p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Dashboard</p>
 						{isAuthLoading ? (
 							<span className="text-xs text-slate-400">Checking auth...</span>
-						) : isAuthenticated ? (
+						) : session?.isAuthenticated ? (
 							<button
 								type="button"
 								onClick={() => void handleLogout()}

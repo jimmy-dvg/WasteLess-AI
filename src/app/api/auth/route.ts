@@ -4,19 +4,18 @@ import { profiles } from '@/src/lib/drizzle-schema';
 import { generateToken } from '@/src/lib/jwt-auth';
 import { eq } from 'drizzle-orm';
 import crypto from 'crypto';
+import bcrypt from 'bcryptjs';
 
 /**
  * Simple password hashing (use bcrypt in production)
  */
 function hashPassword(password: string): string {
-	return crypto.createHash('sha256').update(password).digest('hex');
+	// bcrypt with 10 rounds
+	return bcrypt.hashSync(password, 10);
 }
 
-/**
- * Verify password
- */
 function verifyPassword(password: string, hash: string): boolean {
-	return hashPassword(password) === hash;
+	return bcrypt.compareSync(password, hash);
 }
 
 export async function POST(request: Request) {
