@@ -41,6 +41,17 @@ npm run dev
 - `npm run build` - Build for production
 - `npm run start` - Start production build
 - `npm run lint` - Run ESLint
+- `npm run db:generate` - Generate Drizzle migrations from the schema
+- `npm run db:migrate` - Apply Drizzle migrations
+- `npm run db:studio` - Open Drizzle Studio
+
+## Database
+
+The project now includes a Drizzle schema layer that mirrors the current PostgreSQL tables.
+It is defined in `src/lib/drizzle-schema.ts` and configured through `drizzle.config.ts`.
+
+The existing SQL files in `sql/` remain committed as reference, but new schema changes should
+use Drizzle migrations going forward.
 
 ## PWA Support
 
