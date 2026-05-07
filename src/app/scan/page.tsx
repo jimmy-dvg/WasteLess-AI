@@ -11,8 +11,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Camera } from "lucide-react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
-import getSupabaseBrowserClient from "@/src/lib/supabase-browser";
+import { useEffect, useRef, useState } from "react";
 
 type DetectedFoodItem = {
 	name: string;
@@ -39,7 +38,6 @@ function fileToBase64(file: File): Promise<string> {
 
 export default function ScanPage() {
 	const router = useRouter();
-	const supabase = useMemo(() => getSupabaseBrowserClient(), []);
 	const { session: authSession, isLoading: isAuthLoading, getAuthHeader } = useAuth();
 	const [isAuthChecking, setIsAuthChecking] = useState(true);
 	const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -76,7 +74,7 @@ export default function ScanPage() {
 		return () => {
 			isMounted = false;
 		};
-	}, [router, supabase, authSession, isAuthLoading]);
+	}, [router, authSession, isAuthLoading]);
 
 	useEffect(() => {
 		if (!selectedFile) {

@@ -19,7 +19,6 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import getSupabaseBrowserClient from "@/src/lib/supabase-browser";
 
 type IngredientItem = {
 	id: string;
@@ -446,48 +445,7 @@ function getSpeechRecognitionCtor(): (new () => SpeechRecognitionLike) | null {
 	return speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition ?? null;
 }
 
-async function fetchTopExpiryItems(): Promise<IngredientItem[]> {
-	const supabase = getSupabaseBrowserClient();
-	const pantryResponse = await supabase
-		.from("pantry_items")
-		.select("id, name, shelf_life_days, created_at")
-		.order("created_at", { ascending: false })
-		.limit(20);
-
-	if (pantryResponse.error) {
-		throw pantryResponse.error;
-	}
-
-	const pantryItems = Array.isArray(pantryResponse.data) ? pantryResponse.data : [];
-	return pantryItems
-		.map((item: any) => {
-			const createdAt = item.created_at ? String(item.created_at) : "";
-			const shelfLifeDays = Number(item.shelf_life_days ?? 0);
-			return {
-				id: String(item.id ?? ""),
-				name: String(item.name ?? "").trim(),
-				quantity: null,
-				expiryDate:
-					createdAt.length > 0 && Number.isFinite(shelfLifeDays)
-						? addDays(createdAt, Math.max(0, Math.round(shelfLifeDays)))
-						: null,
-			};
-		})
-		.filter((item: any) => item.id.length > 0 && item.name.length > 0)
-		.sort((a: any, b: any) => {
-			if (!a.expiryDate && !b.expiryDate) {
-				return 0;
-			}
-			if (!a.expiryDate) {
-				return 1;
-			}
-			if (!b.expiryDate) {
-				return -1;
-			}
-			return new Date(a.expiryDate).getTime() - new Date(b.expiryDate).getTime();
-		})
-		.slice(0, 6);
-}
+/* fetchTopExpiryItems removed — use `/api/pantry` from component with auth headers */
 
 function normalizeRecipeArray(data: unknown): Recipe[] {
 	if (!Array.isArray(data)) {
@@ -611,7 +569,6 @@ function normalizeRecipeArray(data: unknown): Recipe[] {
 
 export default function RecipesPage() {
 	const router = useRouter();
-	const supabase = useMemo(() => getSupabaseBrowserClient(), []);
 	const { session: authSession, isLoading: isAuthLoading, getAuthHeader } = useAuth();
 	const [isAuthChecking, setIsAuthChecking] = useState(true);
 	const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -687,7 +644,7 @@ export default function RecipesPage() {
 		return () => {
 			isMounted = false;
 		};
-	}, [router, supabase]);
+	}, [router]);
 
 	const hydrateCollectionsFromLocalStorage = useCallback(() => {
 		try {
@@ -876,7 +833,7 @@ export default function RecipesPage() {
 		return () => {
 			isCancelled = true;
 		};
-	}, [currentUserId, hydrateCollectionsFromLocalStorage, isAuthenticated, router, supabase]);
+	}, [currentUserId, hydrateCollectionsFromLocalStorage, isAuthenticated, router]);
 
 	useEffect(() => {
 		if (!isCollectionsReady || cloudFavoritesEnabled) {
@@ -963,7 +920,7 @@ export default function RecipesPage() {
 		return () => {
 			isCancelled = true;
 		};
-	}, [cloudFavoritesEnabled, currentUserId, favoriteRecipePayloads, favoriteRecipes, isCollectionsReady, supabase]);
+	}, [cloudFavoritesEnabled, currentUserId, favoriteRecipePayloads, favoriteRecipes, isCollectionsReady]);
 
 	useEffect(() => {
 		if (
@@ -1025,7 +982,7 @@ export default function RecipesPage() {
 		return () => {
 			isCancelled = true;
 		};
-	}, [cloudShoppingEnabled, currentUserId, isCollectionsReady, shoppingList, supabase]);
+	}, [cloudShoppingEnabled, currentUserId, isCollectionsReady, shoppingList]);
 
 	const generateRecipes = useCallback(async (ingredients: IngredientItem[]) => {
 		if (ingredients.length === 0) {
@@ -1066,7 +1023,7 @@ export default function RecipesPage() {
 			Object.fromEntries(normalized.map((recipe) => [recipe.title, recipe.servings]))
 		);
 		setActiveStepIndex({});
-	}, [router, supabase]);
+	}, [router]);
 
 	const loadSmartRecipes = useCallback(async () => {
 		try {
@@ -1079,7 +1036,23 @@ export default function RecipesPage() {
 			setSelectedRecipe(null);
 			setIsCookMode(false);
 
-			const ingredients = await fetchTopExpiryItems();
+			const headers = getAuthHeader();
+			if (!headers.Authorization && !headers.authorization) {
+				router.replace('/login');
+				return;
+			}
+
+			const pantryRes = await fetch('/api/pantry', { headers });
+			if (!pantryRes.ok) {
+				const payload = await pantryRes.json().catch(() => ({}));
+				throw new Error(String(payload?.details ?? 'Failed to load pantry items'));
+			}
+
+			const pantryData = await pantryRes.json();
+			const ingredients = Array.isArray(pantryData)
+				? pantryData.slice(0, 20).map((it: any) => ({ id: String(it.id ?? ''), name: String(it.name ?? ''), quantity: null, expiryDate: String(it.expiryDate ?? it.expiry_date ?? null) }))
+				: [];
+
 			setSourceItems(ingredients);
 			await generateRecipes(ingredients);
 		} catch (error) {
@@ -1242,25 +1215,9 @@ export default function RecipesPage() {
 			return;
 		}
 
-		if (!currentUserId) {
-			return;
-		}
+		if (!currentUserId) return;
 
 		try {
-			if (note.length === 0) {
-				const deleteResponse = await supabase
-					.from("recipe_notes")
-					.delete()
-					.eq("user_id", currentUserId)
-					.eq("recipe_title", recipeTitle);
-
-				if (deleteResponse.error) {
-					throw deleteResponse.error;
-				}
-
-				return;
-			}
-
 			const headers = getAuthHeader();
 
 			if (!headers.Authorization && !headers.authorization) {
@@ -1287,7 +1244,7 @@ export default function RecipesPage() {
 
 			setErrorMessage(toErrorMessage(error, "Failed to save recipe note."));
 		}
-	}, [cloudNotesEnabled, currentUserId, isCollectionsReady, recipeNotes, supabase]);
+	}, [cloudNotesEnabled, currentUserId, isCollectionsReady, recipeNotes]);
 
 	const askAssistantForNote = useCallback(
 		async (recipe: Recipe) => {
@@ -1352,7 +1309,7 @@ export default function RecipesPage() {
 				setIsAskingAssistant(null);
 			}
 		},
-		[activeStepIndex, recipeNotes, router, servingsMap, supabase]
+		[activeStepIndex, recipeNotes, router, servingsMap]
 	);
 
 	const startStepTimer = useCallback((recipe: Recipe, stepIndex: number, timerMinutes: number) => {

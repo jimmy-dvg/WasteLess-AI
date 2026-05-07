@@ -222,10 +222,16 @@ export async function POST(request: Request) {
 				return NextResponse.json({ error: 'BadRequest', details: 'Missing recipeTitle' }, { status: 400 });
 			}
 
-			// Delete existing and insert new (simple upsert)
+			// Delete existing first
 			await db.delete(recipeNotes).where(
 				and(eq(recipeNotes.userId, user.userId), eq(recipeNotes.recipeTitle, recipeTitle))
 			);
+
+			// If note is empty, do not insert — this represents deletion
+			if (note.length === 0) {
+				return NextResponse.json({ upserted: 0, deleted: 1 });
+			}
+
 			await db.insert(recipeNotes).values({ userId: user.userId, recipeTitle, note, updatedAt: new Date() });
 			return NextResponse.json({ upserted: 1 });
 		}

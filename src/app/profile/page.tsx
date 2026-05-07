@@ -6,8 +6,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Bell, Heart, Leaf, Settings2, UserRound } from "lucide-react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
-import getSupabaseBrowserClient from "@/src/lib/supabase-browser";
+import { useEffect, useState } from "react";
 
 type ProfileTab = "favorites" | "settings";
 
@@ -111,7 +110,6 @@ function isMissingFavoriteRecipesTable(errorCode: string): boolean {
 
 export default function ProfilePage() {
 	const router = useRouter();
-	const supabase = useMemo(() => getSupabaseBrowserClient(), []);
 	const { session: authSession, isLoading: isAuthLoading, getAuthHeader } = useAuth();
 
 	const [isAuthChecking, setIsAuthChecking] = useState(true);
@@ -165,31 +163,13 @@ export default function ProfilePage() {
 				// fallthrough to legacy supabase session retrieval
 			}
 
-			// Fallback: try to read session from supabase shim
-			try {
-				const { data: { session } } = await supabase.auth.getSession();
-				if (!isMounted) return;
-				if (!session?.access_token) {
-					setIsAuthenticated(false);
-					setCurrentUserId(null);
-					setIsAuthChecking(false);
-					router.replace("/login");
-					return;
-				}
-
-				setIsAuthenticated(true);
-				setCurrentUserId((session as any).user.id);
-				setDisplayName(getDisplayName((session as any).user.email ?? null, (session as any).user.user_metadata));
-				setAvatarUrl(getAvatarUrl((session as any).user.user_metadata));
-				setIsAuthChecking(false);
-			} catch (err) {
+				// No shim fallback — if JWT decode didn't work, force login
 				if (isMounted) {
 					setIsAuthenticated(false);
 					setCurrentUserId(null);
 					setIsAuthChecking(false);
 					router.replace("/login");
 				}
-			}
 		};
 
 		void initAuth();
@@ -197,7 +177,7 @@ export default function ProfilePage() {
 		return () => {
 			isMounted = false;
 		};
-	}, [router, supabase, authSession, isAuthLoading]);
+	}, [router, authSession, isAuthLoading]);
 
 	useEffect(() => {
 		if (typeof window === "undefined") {
@@ -304,7 +284,7 @@ export default function ProfilePage() {
 		return () => {
 			isCancelled = true;
 		};
-	}, [currentUserId, isAuthenticated, supabase]);
+	}, [currentUserId, isAuthenticated]);
 
 	if (isAuthChecking) {
 		return (
