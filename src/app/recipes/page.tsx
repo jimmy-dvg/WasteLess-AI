@@ -619,17 +619,30 @@ export default function RecipesPage() {
 
 		const initAuth = async () => {
 			if (isAuthLoading) return;
-			if (!authSession?.isAuthenticated) {
+
+			const storedToken = typeof window !== "undefined" ? localStorage.getItem("authToken") : null;
+			const activeToken = storedToken ?? authSession?.token ?? null;
+
+			if (!activeToken) {
 				if (isMounted) {
 					setIsAuthenticated(false);
+					setCurrentUserId(null);
 					setIsAuthChecking(false);
-					router.replace("/login");
 				}
 				return;
 			}
 
 			if (isMounted) {
 				setIsAuthenticated(true);
+				try {
+					const parts = activeToken.split(".");
+						if (parts.length >= 2) {
+							const payload = JSON.parse(atob(parts[1]));
+							setCurrentUserId(String(payload.userId ?? payload.user_id ?? ""));
+						}
+				} catch {
+					setCurrentUserId(null);
+				}
 				setIsAuthChecking(false);
 			}
 		};
@@ -639,7 +652,7 @@ export default function RecipesPage() {
 		return () => {
 			isMounted = false;
 		};
-	}, [router]);
+	}, [router, authSession, isAuthLoading]);
 
 	const hydrateCollectionsFromLocalStorage = useCallback(() => {
 		try {
@@ -714,7 +727,7 @@ export default function RecipesPage() {
 			try {
 				const headers = getAuthHeader();
 				if (!headers.Authorization && !headers.authorization) {
-					router.replace("/login");
+					setErrorMessage("Please sign in again to continue.");
 					return;
 				}
 
@@ -874,7 +887,7 @@ export default function RecipesPage() {
 			const headers = getAuthHeader();
 
 			if (!headers.Authorization && !headers.authorization) {
-				router.replace("/login");
+				setErrorMessage("Please sign in again to save your note.");
 				return;
 			}
 
@@ -937,7 +950,7 @@ export default function RecipesPage() {
 			const headers = getAuthHeader();
 
 			if (!headers.Authorization && !headers.authorization) {
-				router.replace("/login");
+				setErrorMessage("Please sign in again to use the assistant.");
 				return;
 			}
 
@@ -987,7 +1000,7 @@ export default function RecipesPage() {
 		const headers = getAuthHeader();
 
 		if (!headers.Authorization && !headers.authorization) {
-			router.replace("/login");
+			setErrorMessage("Please sign in again to generate recipes.");
 			throw new Error("Please log in to generate recipes.");
 		}
 
@@ -1033,7 +1046,7 @@ export default function RecipesPage() {
 
 			const headers = getAuthHeader();
 			if (!headers.Authorization && !headers.authorization) {
-				router.replace('/login');
+				setErrorMessage("Please sign in again to continue.");
 				return;
 			}
 
@@ -1061,7 +1074,7 @@ export default function RecipesPage() {
 	const regenerateRecipes = useCallback(async () => {
 		try {
 			if (!isAuthenticated) {
-				router.replace("/login");
+				setErrorMessage("Please sign in again to regenerate recipes.");
 				return;
 			}
 
@@ -1216,7 +1229,7 @@ export default function RecipesPage() {
 			const headers = getAuthHeader();
 
 			if (!headers.Authorization && !headers.authorization) {
-				router.replace("/login");
+				setErrorMessage("Please sign in again to save your note.");
 				return;
 			}
 
@@ -1252,7 +1265,7 @@ export default function RecipesPage() {
 			const headers = getAuthHeader();
 
 			if (!headers.Authorization && !headers.authorization) {
-				router.replace("/login");
+				setErrorMessage("Please sign in again to use the assistant.");
 				return;
 			}
 

@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from "react";
 
 export default function AdminDashboardPage() {
 	const router = useRouter();
-	const { getAuthHeader } = useAuth();
+	const { getAuthHeader, isLoading: isAuthLoading } = useAuth();
 	const [isCheckingAccess, setIsCheckingAccess] = useState(true);
 	const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -34,7 +34,9 @@ export default function AdminDashboardPage() {
 			}
 		};
 
-		void checkAccess();
+		if (!isAuthLoading) {
+			void checkAccess();
+		}
 	}, [router, getAuthHeader]);
 
 	if (isCheckingAccess) {

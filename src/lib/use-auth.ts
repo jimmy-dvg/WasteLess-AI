@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 export interface AuthSession {
@@ -22,22 +22,22 @@ export function useAuth() {
 		} else {
 			setSession({ token: null, isAuthenticated: false });
 			// Redirect to login if not authenticated
-			router.push('/login');
+			router.replace('/login');
 		}
 		setIsLoading(false);
 	}, [router]);
 
-	const logout = () => {
+	const logout = useCallback(() => {
 		localStorage.removeItem('authToken');
 		setSession({ token: null, isAuthenticated: false });
-		router.push('/login');
-	};
+		router.replace('/login');
+	}, [router]);
 
-	const getAuthHeader = () => {
+	const getAuthHeader = useCallback(() => {
 		const headers: Record<string, string> = {};
 		if (session.token) headers.Authorization = `Bearer ${session.token}`;
 		return headers;
-	};
+	}, [session.token]);
 
 	return { session, isLoading, logout, getAuthHeader };
 }

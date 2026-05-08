@@ -37,8 +37,11 @@ export default function InventoryPage() {
             }
         };
 
-        void load();
-    }, [getAuthHeader]);
+        // Only load if auth is loaded
+        if (!isAuthLoading) {
+            void load();
+        }
+    }, [getAuthHeader, isAuthLoading]);
 
     return (
         <div className="min-h-screen bg-white">

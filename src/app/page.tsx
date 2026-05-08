@@ -119,8 +119,11 @@ export default function Home() {
 			}
 		};
 
-		void fetchItems();
-	}, [getAuthHeader]);
+		// Only fetch if auth is loaded and user is authenticated
+		if (!isAuthLoading && session.isAuthenticated) {
+			void fetchItems();
+		}
+	}, [getAuthHeader, isAuthLoading, session.isAuthenticated]);
 
 	useEffect(() => {
 		// `useAuth` manages session state and redirects. Nothing needed here.

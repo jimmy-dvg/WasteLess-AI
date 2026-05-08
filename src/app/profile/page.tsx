@@ -128,6 +128,7 @@ export default function ProfilePage() {
 
 	useEffect(() => {
 		let isMounted = true;
+		let shouldRedirectToLogin = false;
 
 		const initAuth = async () => {
 			if (isAuthLoading) return;
@@ -137,7 +138,7 @@ export default function ProfilePage() {
 					setIsAuthenticated(false);
 					setCurrentUserId(null);
 					setIsAuthChecking(false);
-					router.replace("/login");
+					shouldRedirectToLogin = true;
 				}
 				return;
 			}
@@ -161,13 +162,19 @@ export default function ProfilePage() {
 				}
 			} catch (err) {
 			} finally {
-				// No shim fallback — if JWT decode didn't work, force login
-				if (isMounted) {
-					setIsAuthenticated(false);
-					setCurrentUserId(null);
-					setIsAuthChecking(false);
-					router.replace("/login");
+				if (!isMounted) {
+					return;
 				}
+
+				if (!shouldRedirectToLogin) {
+					return;
+				}
+
+				// No shim fallback — if JWT decode didn't work, force login
+				setIsAuthenticated(false);
+				setCurrentUserId(null);
+				setIsAuthChecking(false);
+				router.replace("/login");
 			}
 		};
 

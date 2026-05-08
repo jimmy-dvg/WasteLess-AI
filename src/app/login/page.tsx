@@ -33,7 +33,7 @@ export default function LoginPage() {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
-					action: mode,
+					action: mode === "signup" ? "register" : "login",
 					email: email.trim(),
 					password,
 				}),
