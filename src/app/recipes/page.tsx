@@ -841,7 +841,7 @@ export default function RecipesPage() {
 		return () => {
 			isCancelled = true;
 		};
-	}, [currentUserId, hydrateCollectionsFromLocalStorage, isAuthenticated, router]);
+	}, [currentUserId, hydrateCollectionsFromLocalStorage, isAuthenticated, router, getAuthHeader]);
 
 	useEffect(() => {
 		if (!isCollectionsReady || cloudFavoritesEnabled) {
@@ -928,7 +928,7 @@ export default function RecipesPage() {
 		return () => {
 			isCancelled = true;
 		};
-	}, [cloudFavoritesEnabled, currentUserId, favoriteRecipePayloads, favoriteRecipes, isCollectionsReady]);
+	}, [cloudFavoritesEnabled, currentUserId, favoriteRecipePayloads, favoriteRecipes, isCollectionsReady, getAuthHeader]);
 
 	useEffect(() => {
 		if (
@@ -990,7 +990,7 @@ export default function RecipesPage() {
 		return () => {
 			isCancelled = true;
 		};
-	}, [cloudShoppingEnabled, currentUserId, isCollectionsReady, shoppingList]);
+	}, [cloudShoppingEnabled, currentUserId, isCollectionsReady, shoppingList, getAuthHeader]);
 
 	const generateRecipes = useCallback(async (ingredients: IngredientItem[]) => {
 		if (ingredients.length === 0) {
@@ -1031,7 +1031,7 @@ export default function RecipesPage() {
 			Object.fromEntries(normalized.map((recipe) => [recipe.title, recipe.servings]))
 		);
 		setActiveStepIndex({});
-	}, [router]);
+	}, [router, getAuthHeader]);
 
 	const loadSmartRecipes = useCallback(async () => {
 		try {
@@ -1095,6 +1095,13 @@ export default function RecipesPage() {
 			void loadSmartRecipes();
 		}
 	}, [isAuthChecking, isAuthenticated, loadSmartRecipes]);
+
+	// Clear transient auth error when user becomes authenticated
+	useEffect(() => {
+		if (!isAuthChecking && isAuthenticated) {
+			setErrorMessage(null);
+		}
+	}, [isAuthChecking, isAuthenticated]);
 
 	const toggleFavorite = useCallback((recipe: Recipe) => {
 		const recipeTitle = recipe.title;
@@ -1252,7 +1259,7 @@ export default function RecipesPage() {
 
 			setErrorMessage(toErrorMessage(error, "Failed to save recipe note."));
 		}
-	}, [cloudNotesEnabled, currentUserId, isCollectionsReady, recipeNotes]);
+	}, [cloudNotesEnabled, currentUserId, isCollectionsReady, recipeNotes, getAuthHeader]);
 
 	const askAssistantForNote = useCallback(
 		async (recipe: Recipe) => {
@@ -1317,7 +1324,7 @@ export default function RecipesPage() {
 				setIsAskingAssistant(null);
 			}
 		},
-		[activeStepIndex, recipeNotes, router, servingsMap]
+	[activeStepIndex, recipeNotes, router, servingsMap, getAuthHeader]
 	);
 
 	const startStepTimer = useCallback((recipe: Recipe, stepIndex: number, timerMinutes: number) => {

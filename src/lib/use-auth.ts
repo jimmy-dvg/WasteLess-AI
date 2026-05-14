@@ -27,6 +27,29 @@ export function useAuth() {
 		setIsLoading(false);
 	}, [router]);
 
+	useEffect(() => {
+		// Handler to sync auth state when token changes (cross-tab or same-tab)
+		const syncAuth = () => {
+			const t = localStorage.getItem('authToken');
+			if (t) {
+				setSession({ token: t, isAuthenticated: true });
+			} else {
+				setSession({ token: null, isAuthenticated: false });
+			}
+			setIsLoading(false);
+		};
+
+		// Listen for storage events (other tabs)
+		window.addEventListener('storage', syncAuth);
+		// Listen for same-tab custom event dispatched after login/logout
+		window.addEventListener('wasteless-auth-changed', syncAuth as EventListener);
+
+		return () => {
+			window.removeEventListener('storage', syncAuth);
+			window.removeEventListener('wasteless-auth-changed', syncAuth as EventListener);
+		};
+	}, []);
+
 	const logout = useCallback(() => {
 		localStorage.removeItem('authToken');
 		setSession({ token: null, isAuthenticated: false });

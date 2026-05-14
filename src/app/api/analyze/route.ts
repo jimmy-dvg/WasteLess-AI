@@ -128,6 +128,16 @@ function isGeminiModelNotFoundError(error: unknown): boolean {
 	);
 }
 
+function isGeminiServiceUnavailableError(error: unknown): boolean {
+	if (!(error instanceof Error)) return false;
+	const message = error.message.toLowerCase();
+	return message.includes("503") || message.includes("service unavailable") || message.includes("high demand");
+}
+
+function sleep(ms: number) {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function isGeminiInvalidImageError(error: unknown): boolean {
 	if (!(error instanceof Error)) {
 		return false;
@@ -211,33 +221,61 @@ export async function POST(request: Request) {
 		let lastError: unknown;
 		const attemptErrors: string[] = [];
 
+		const maxAttemptsPerModel = 3;
+		const baseBackoffMs = 800; // exponential backoff base
+
 		for (const modelName of modelCandidates) {
-			try {
-				const model = genAI.getGenerativeModel({ model: modelName });
-				const result = await model.generateContent([
-					{ text: ANALYZE_PROMPT },
-					{
-						inlineData: {
-							mimeType,
-							data,
+			let attempt = 0;
+			let shouldTryNextModel = false;
+
+			while (attempt < maxAttemptsPerModel) {
+				try {
+					const model = genAI.getGenerativeModel({ model: modelName });
+					const result = await model.generateContent([
+						{ text: ANALYZE_PROMPT },
+						{
+							inlineData: {
+								mimeType,
+								data,
+							},
 						},
-					},
-				]);
+					]);
 
-				responseText = result.response.text();
-				if (!responseText) {
-					throw new Error(`Gemini model ${modelName} returned an empty response.`);
-				}
+					responseText = result.response.text();
+					if (!responseText) {
+						throw new Error(`Gemini model ${modelName} returned an empty response.`);
+					}
 
-				selectedModel = modelName;
+					selectedModel = modelName;
+					shouldTryNextModel = false;
+					break;
+				} catch (error) {
+					lastError = error;
+					if (error instanceof Error) {
+						attemptErrors.push(`${modelName}: ${error.message}`);
+					}
 
-				break;
-			} catch (error) {
-				lastError = error;
-				if (error instanceof Error) {
-					attemptErrors.push(`${modelName}: ${error.message}`);
+					const retryAfter = extractRetryAfterSeconds(error) ?? 0;
+					const isQuota = isGeminiQuotaError(error);
+					const isSvcUnavailable = isGeminiServiceUnavailableError(error);
+
+					// If quota or service issues, retry a few times with backoff;
+					// honor a short retry-after when present but cap it.
+					if ((isQuota || isSvcUnavailable) && attempt < maxAttemptsPerModel - 1) {
+						const waitSec = Math.min(retryAfter || Math.pow(2, attempt) * (baseBackoffMs / 1000), 5);
+						await sleep(Math.ceil(waitSec * 1000));
+						attempt++;
+						continue; // try same model again
+					}
+
+					// For other permanent errors, move to next model.
+					shouldTryNextModel = true;
+					break;
 				}
 			}
+
+			if (responseText) break;
+			if (shouldTryNextModel) continue;
 		}
 
 		if (!responseText) {

@@ -48,6 +48,11 @@ export default function LoginPage() {
 			// Store JWT token
 			localStorage.setItem("authToken", data.token);
 
+			// Notify other code in the same tab that auth changed
+			try {
+				window.dispatchEvent(new Event('wasteless-auth-changed'));
+			} catch {}
+
 			if (mode === "signup") {
 				setSuccessMessage("Account created successfully! Redirecting...");
 				setTimeout(() => {
