@@ -2,7 +2,7 @@
 
 import BottomNav from "@/components/BottomNav";
 import { useAuth } from "@/src/lib/use-auth";
-import { ChefHat, Clock3, ScanLine, Sparkles } from "lucide-react";
+import { ChefHat, Clock3, ScanLine, Sparkles, ShoppingCart } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -234,6 +234,15 @@ export default function Home() {
 							<ChefHat className="h-6 w-6 text-amber-700" aria-hidden="true" />
 							<p className="mt-3 text-sm font-semibold text-amber-900">Get Recipe Ideas</p>
 							<p className="mt-1 text-xs text-amber-700/80">Cook what matters first</p>
+						</Link>
+
+						<Link
+							href="/shopping"
+							className="rounded-3xl border border-sky-200 bg-sky-50 p-4 shadow-sm transition hover:bg-sky-100"
+						>
+							<ShoppingCart className="h-6 w-6 text-sky-700" aria-hidden="true" />
+							<p className="mt-3 text-sm font-semibold text-sky-900">Shopping List</p>
+							<p className="mt-1 text-xs text-sky-700/80">View & manage your list</p>
 						</Link>
 					</div>
 				</section>
