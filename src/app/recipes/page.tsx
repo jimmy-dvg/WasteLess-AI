@@ -1396,6 +1396,19 @@ export default function RecipesPage() {
 		setIsCookMode(false);
 	}, []);
 
+	useEffect(() => {
+		if (!selectedRecipe) return;
+
+		const onKey = (e: KeyboardEvent) => {
+			if (e.key === "Escape") {
+				closeRecipeDetails();
+			}
+		};
+
+		window.addEventListener("keydown", onKey);
+		return () => window.removeEventListener("keydown", onKey);
+	}, [selectedRecipe, closeRecipeDetails]);
+
 	const processVoiceCommand = useCallback(
 		(command: string) => {
 			const activeRecipe = selectedRecipe;
@@ -1604,9 +1617,9 @@ export default function RecipesPage() {
 	if (isAuthChecking) {
 		return (
 			<main className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top,_#fff7ed_0%,_#fffbeb_42%,_#ecfdf5_100%)] px-4">
-				<p className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm">
-					Checking session...
-				</p>
+					<p className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm">
+						Checking session...
+					</p>
 			</main>
 		);
 	}
@@ -1860,30 +1873,38 @@ export default function RecipesPage() {
 						initial={{ opacity: 0 }}
 						animate={{ opacity: 1 }}
 						exit={{ opacity: 0 }}
+						onClick={() => closeRecipeDetails()}
+						role="presentation"
 					>
 						<motion.div
 							initial={{ y: 30, opacity: 0 }}
 							animate={{ y: 0, opacity: 1 }}
 							exit={{ y: 18, opacity: 0 }}
 							transition={{ duration: 0.2 }}
-							className="max-h-[84vh] w-full max-w-md overflow-y-auto rounded-3xl border border-orange-100 bg-white p-5 shadow-2xl"
+							onClick={(e) => e.stopPropagation()}
+							role="dialog"
+							aria-modal="true"
+							aria-labelledby="recipe-modal-title"
+							className="w-full max-w-md h-[92vh] sm:h-auto sm:max-h-[84vh] rounded-3xl overflow-hidden bg-white shadow-2xl flex flex-col"
+							data-modal-root
 						>
-							<div className="flex items-start justify-between gap-3">
+							<div className="sticky top-0 z-40 bg-white/95 backdrop-blur-sm border-b px-5 py-3 flex items-start justify-between gap-3">
 								<div>
 									<p className="text-xs font-semibold uppercase tracking-[0.15em] text-emerald-600">Recipe Keeper</p>
-									<h3 className="mt-1 text-xl font-bold text-orange-950">{selectedRecipe.title}</h3>
+									<h3 id="recipe-modal-title" className="mt-1 text-xl font-bold text-orange-950">{selectedRecipe.title}</h3>
 								</div>
 								<button
 									type="button"
 									onClick={closeRecipeDetails}
-									className="rounded-full border border-slate-200 p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
+									className="ml-2 inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-200"
 									aria-label="Close recipe details"
 								>
 									<X className="h-4 w-4" aria-hidden="true" />
 								</button>
 							</div>
 
-							<p className="mt-2 text-sm text-amber-900/90">{selectedRecipe.description}</p>
+							<div className="p-5 overflow-y-auto flex-1" data-modal-content>
+								<p className="mt-2 text-sm text-amber-900/90">{selectedRecipe.description}</p>
 
 							<div className="mt-3 flex items-center justify-between gap-2">
 								<button
@@ -2200,6 +2221,7 @@ export default function RecipesPage() {
 									</div>
 								</>
 							)}
+							</div>
 						</motion.div>
 					</motion.div>
 				) : null}
