@@ -68,6 +68,26 @@ To install on mobile:
 
 For install prompts and offline caching to work correctly, deploy over HTTPS.
 
+## Deploy to Netlify
+
+This repo includes `netlify.toml` with the Netlify build settings for the Next.js app:
+
+```bash
+npm run build
+```
+
+Netlify should use `.next` as the publish directory. The project also includes `.nvmrc`
+to build with Node.js 22.
+
+Before deploying, add these environment variables in Netlify:
+
+- `GEMINI_API_KEY`
+- `DATABASE_URL`
+- `JWT_SECRET`
+
+Optional model and fallback variables are listed in `.env.example`. Keep `.env.local`
+only for local development; Netlify does not read it during hosted builds.
+
 ## Core Paths
 
 - `src/app/page.tsx` - Home screen

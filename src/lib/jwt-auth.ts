@@ -3,7 +3,20 @@ import { getDrizzleClient } from '@/src/lib/drizzle-client';
 import { profiles } from '@/src/lib/drizzle-schema';
 import { eq } from 'drizzle-orm';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-change-me';
+const DEV_JWT_SECRET = 'fallback-secret-change-me';
+
+function getJwtSecret(): string {
+	const secret = process.env.JWT_SECRET?.trim();
+	if (secret) {
+		return secret;
+	}
+
+	if (process.env.NODE_ENV === 'production') {
+		throw new Error('Missing JWT_SECRET environment variable.');
+	}
+
+	return DEV_JWT_SECRET;
+}
 
 export interface TokenPayload {
 	userId: string;
@@ -16,7 +29,7 @@ export interface TokenPayload {
  */
 export function generateToken(userId: string, email: string, role: string = 'user'): string {
 	const payload: TokenPayload = { userId, email, role };
-	return jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
+	return jwt.sign(payload, getJwtSecret(), { expiresIn: '7d' });
 }
 
 /**
@@ -24,8 +37,8 @@ export function generateToken(userId: string, email: string, role: string = 'use
  */
 export function verifyToken(token: string): TokenPayload | null {
 	try {
-		return jwt.verify(token, JWT_SECRET) as TokenPayload;
-	} catch (error) {
+		return jwt.verify(token, getJwtSecret()) as TokenPayload;
+	} catch {
 		return null;
 	}
 }
