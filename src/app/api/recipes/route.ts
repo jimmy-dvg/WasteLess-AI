@@ -48,11 +48,9 @@ type GeminiModelListResponse = {
 };
 
 const DEFAULT_RECIPE_MODELS = [
-	"gemini-2.5-flash-preview-05-20",
-	"gemini-2.0-flash-lite",
-	"gemini-2.0-flash",
 	"gemini-2.5-flash",
-	"gemini-2.5-flash-latest",
+	"gemini-2.0-flash",
+	"gemini-2.0-flash-lite",
 ];
 
 function normalizeModelName(modelName: string): string {
@@ -253,6 +251,188 @@ Rules:
 - Do not include markdown, explanations, or code fences.`;
 }
 
+function buildFallbackRecipes(items: FoodItemInput[]): RecipeOutput[] {
+	const ingredientNames = items
+		.map((item) => item.name.trim())
+		.filter((name) => name.length > 0)
+		.slice(0, 8);
+	const selectedNames = ingredientNames.length > 0 ? ingredientNames : ["available ingredients"];
+	const primary = selectedNames[0];
+	const secondary = selectedNames[1] ?? "pantry basics";
+	const ingredientOutputs = selectedNames.slice(0, 6).map((name) => ({
+		name,
+		amount: 1,
+		unit: "portion",
+	}));
+
+	return [
+		{
+			title: `Quick ${primary} Skillet`,
+			description:
+				"A simple fallback recipe generated from your pantry while the AI service is temporarily unavailable.",
+			prepTimeMinutes: 20,
+			difficulty: "Easy",
+			servings: 2,
+			tags: ["quick dinner", "pantry rescue", "low waste"],
+			nutrition: { calories: 420, protein: 18, carbs: 48, fat: 16 },
+			ingredients: ingredientOutputs,
+			steps: [
+				{
+					title: "Prep ingredients",
+					instruction: `Wash and slice ${selectedNames.slice(0, 3).join(", ")} into bite-sized pieces.`,
+					timerMinutes: 5,
+					visualHint: "Ingredients are evenly chopped.",
+					videoHint: "Short prep montage.",
+				},
+				{
+					title: "Cook base",
+					instruction: "Warm a little oil in a pan over medium heat, then add the firmest ingredients first.",
+					timerMinutes: 6,
+					visualHint: "Edges start to soften and lightly brown.",
+					videoHint: "Pan saute close-up.",
+				},
+				{
+					title: "Finish",
+					instruction: "Add salt, pepper, and a splash of water if needed. Cook until everything is tender.",
+					timerMinutes: 7,
+					visualHint: "Mixture looks glossy and cooked through.",
+					videoHint: "Final toss in pan.",
+				},
+				{
+					title: "Serve",
+					instruction: "Taste, adjust seasoning, and serve warm with any bread, rice, or salad you have.",
+					timerMinutes: 2,
+					visualHint: "Finished plate is balanced and colorful.",
+					videoHint: "Simple plating shot.",
+				},
+			],
+		},
+		{
+			title: `${primary} and ${secondary} Bowl`,
+			description:
+				"A flexible bowl that combines your available ingredients with basic seasoning.",
+			prepTimeMinutes: 18,
+			difficulty: "Easy",
+			servings: 2,
+			tags: ["bowl", "flexible", "meal prep"],
+			nutrition: { calories: 390, protein: 16, carbs: 52, fat: 12 },
+			ingredients: ingredientOutputs.slice(0, 5),
+			steps: [
+				{
+					title: "Build base",
+					instruction: "Use any cooked grain, toast, or leafy vegetables as the base of the bowl.",
+					timerMinutes: 3,
+					visualHint: "Base covers the bottom of the bowl.",
+					videoHint: "Bowl assembly start.",
+				},
+				{
+					title: "Warm ingredients",
+					instruction: `Lightly warm ${selectedNames.slice(0, 4).join(", ")} with oil, salt, and pepper.`,
+					timerMinutes: 8,
+					visualHint: "Ingredients are warm but still hold texture.",
+					videoHint: "Warm ingredients in pan.",
+				},
+				{
+					title: "Add contrast",
+					instruction: "Add something crisp, acidic, or creamy if available, such as lemon, yogurt, or pickles.",
+					timerMinutes: 2,
+					visualHint: "Bowl has varied colors and textures.",
+					videoHint: "Add garnish.",
+				},
+				{
+					title: "Serve",
+					instruction: "Finish with a final pinch of seasoning and serve immediately.",
+					timerMinutes: 1,
+					visualHint: "Ready-to-eat bowl.",
+					videoHint: "Final bowl shot.",
+				},
+			],
+		},
+		{
+			title: `WasteLess ${primary} Soup`,
+			description:
+				"A low-waste soup idea for using mixed pantry items before they expire.",
+			prepTimeMinutes: 30,
+			difficulty: "Medium",
+			servings: 3,
+			tags: ["soup", "low waste", "comfort food"],
+			nutrition: { calories: 360, protein: 14, carbs: 44, fat: 11 },
+			ingredients: ingredientOutputs,
+			steps: [
+				{
+					title: "Start aromatics",
+					instruction: "If you have onion, garlic, or herbs, cook them in oil for a few minutes. Otherwise start with your main ingredients.",
+					timerMinutes: 4,
+					visualHint: "Aromatics smell fragrant.",
+					videoHint: "Pot base cooking.",
+				},
+				{
+					title: "Simmer",
+					instruction: `Add ${selectedNames.slice(0, 5).join(", ")} and enough water to cover. Simmer gently.`,
+					timerMinutes: 18,
+					visualHint: "Soup bubbles gently, not aggressively.",
+					videoHint: "Gentle simmer.",
+				},
+				{
+					title: "Adjust texture",
+					instruction: "Mash part of the soup or blend briefly if you want it thicker.",
+					timerMinutes: 4,
+					visualHint: "Soup looks slightly thickened.",
+					videoHint: "Texture adjustment.",
+				},
+				{
+					title: "Season",
+					instruction: "Taste and add salt, pepper, oil, or acid gradually until balanced.",
+					timerMinutes: 3,
+					visualHint: "Seasoning is balanced and not too salty.",
+					videoHint: "Taste and season.",
+				},
+			],
+		},
+	];
+}
+
+function isGeminiQuotaError(error: unknown): boolean {
+	if (!(error instanceof Error)) {
+		return false;
+	}
+
+	const message = error.message.toLowerCase();
+	return (
+		message.includes("429") ||
+		message.includes("quota") ||
+		message.includes("too many requests") ||
+		message.includes("rate-limit") ||
+		message.includes("rate limit")
+	);
+}
+
+function isGeminiModelNotFoundError(error: unknown): boolean {
+	if (!(error instanceof Error)) {
+		return false;
+	}
+
+	const message = error.message.toLowerCase();
+	return (
+		message.includes("not found for api version") ||
+		(message.includes("models/") && message.includes("not found"))
+	);
+}
+
+function hasFallbackEligibleModelError(lastError: unknown, attemptErrors: string[]): boolean {
+	if (isGeminiQuotaError(lastError) || isGeminiModelNotFoundError(lastError)) {
+		return true;
+	}
+
+	const combined = attemptErrors.join(" | ").toLowerCase();
+	return (
+		combined.includes("429") ||
+		combined.includes("quota") ||
+		combined.includes("too many requests") ||
+		combined.includes("not found for api version")
+	);
+}
+
 function normalizeNumber(value: unknown, fallback: number, max = 9999): number {
 	const parsed = Number(value);
 	if (!Number.isFinite(parsed)) {
@@ -443,12 +623,21 @@ async function getRecipeModelCandidates(apiKey: string): Promise<string[]> {
 	);
 
 	const discoveredModels = await fetchDiscoveredGeminiModels(apiKey);
+	const discoveredModelSet = new Set(discoveredModels);
+	const filteredConfiguredModels =
+		discoveredModels.length > 0
+			? configuredModels.filter((model) => discoveredModelSet.has(model))
+			: configuredModels;
+	const filteredDefaultModels =
+		discoveredModels.length > 0
+			? DEFAULT_RECIPE_MODELS.filter((model) => discoveredModelSet.has(model))
+			: DEFAULT_RECIPE_MODELS;
 
 	return Array.from(
 		new Set([
 			...discoveredModels,
-			...configuredModels,
-			...DEFAULT_RECIPE_MODELS,
+			...filteredConfiguredModels,
+			...filteredDefaultModels,
 		])
 	);
 }
@@ -505,6 +694,14 @@ export async function POST(request: Request) {
 		}
 
 		if (!responseText) {
+			if (hasFallbackEligibleModelError(lastError, attemptErrors)) {
+				return NextResponse.json(buildFallbackRecipes(items), {
+					headers: {
+						"x-recipe-fallback": "gemini-unavailable",
+					},
+				});
+			}
+
 			if (lastError instanceof Error) {
 				const compactAttemptErrors = attemptErrors.slice(0, 6).join(" | ");
 				const attemptsSummary = compactAttemptErrors.length > 0 ? ` Tried: ${compactAttemptErrors}` : "";
