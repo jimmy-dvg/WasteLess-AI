@@ -1,96 +1,134 @@
-# Wastless AI
+# WasteLess AI
 
-Mobile-first Next.js app for food scanning and waste reduction.
+Mobile-first Progressive Web App for reducing household food waste. WasteLess AI helps users scan food with AI vision, save pantry items, track storage zones, and generate recipes from ingredients they already have.
 
-## Requirements
+Live demo: https://wasteless-ai-jimmy-dvg.netlify.app
 
-- Node.js 20+
- - Gemini API key
- - (Project uses JWT auth stored in Neon PostgreSQL)
+## Features
 
-## Local Setup
+- AI food recognition from uploaded or captured food photos
+- Pantry inventory saved per authenticated user
+- JWT auth backed by Neon Postgres
+- Recipe suggestions from available ingredients
+- Shopping list and mobile-first pantry views
+- PWA manifest, app icons, and service worker registration
+- Bottom navigation and touch-friendly mobile UI
 
-1. Install dependencies:
+## Tech Stack
+
+- Next.js App Router
+- TypeScript
+- Tailwind CSS
+- lucide-react
+- Neon Postgres
+- Drizzle ORM
+- Google Gemini API
+- Netlify deployment
+
+## Getting Started
+
+Install dependencies:
 
 ```bash
 npm install
 ```
 
-2. Create `.env.local` in the project root:
+Create `.env.local` in the project root:
 
 ```bash
-GEMINI_API_KEY=your_key_here
-GEMINI_MODELS=gemini-2.5-flash,gemini-2.5-flash-latest,gemini-2.0-flash,gemini-2.0-flash-lite
-# DATABASE_URL is required for Neon/Postgres
-DATABASE_URL=postgresql://user:pass@your-neon-host/dbname?sslmode=require
+GEMINI_API_KEY=your_gemini_api_key_here
+DATABASE_URL=postgresql://user:password@your-neon-host/neondb?sslmode=require
+JWT_SECRET=replace_with_a_long_random_secret
 ```
 
-`GEMINI_MODELS` is optional. If omitted, the app uses the same built-in fallback list above.
+Optional model overrides are documented in `.env.example`.
 
-3. Start dev server:
+Run the development server:
 
 ```bash
 npm run dev
 ```
 
-4. Open http://localhost:3000
+Open http://localhost:3000.
 
 ## Scripts
 
-- `npm run dev` - Start local development server
+- `npm run dev` - Start the local Next.js dev server
 - `npm run build` - Build for production
-- `npm run start` - Start production build
+- `npm run start` - Start the production build locally
 - `npm run lint` - Run ESLint
-- `npm run db:generate` - Generate Drizzle migrations from the schema
+- `npm run db:generate` - Generate Drizzle migrations
 - `npm run db:migrate` - Apply Drizzle migrations
 - `npm run db:studio` - Open Drizzle Studio
 
+## Environment Variables
+
+Required:
+
+- `GEMINI_API_KEY` - Gemini API key used by image analysis and recipe routes
+- `DATABASE_URL` - Neon Postgres connection string
+- `JWT_SECRET` - long random secret used to sign auth tokens
+
+Optional:
+
+- `GEMINI_MODELS`
+- `ANALYZE_GEMINI_MODELS`
+- `RECIPE_GEMINI_MODELS`
+- `RECIPE_ASSISTANT_GEMINI_MODELS`
+- `ALLOW_QUOTA_FALLBACK`
+
+Do not commit `.env.local`. Use `.env.example` as the public template.
+
 ## Database
 
-The project now includes a Drizzle schema layer that mirrors the current PostgreSQL tables.
-It is defined in `src/lib/drizzle-schema.ts` and configured through `drizzle.config.ts`.
+The Drizzle schema lives in `src/lib/drizzle-schema.ts`, with migrations in `drizzle/`.
 
-The existing SQL files in `sql/` remain committed as reference, but new schema changes should
-use Drizzle migrations going forward.
-
-## PWA Support
-
-This project is configured as a Progressive Web App (PWA):
-
-- Web manifest is generated from `src/app/manifest.ts`
-- App icons are generated from `src/app/icon.tsx` and `src/app/apple-icon.tsx`
-- Service worker is served from `public/sw.js` and registered by `components/PwaRegister.tsx`
-
-To install on mobile:
-
-- Open the site in Chrome/Edge (Android) and choose **Add to Home screen**
-- Open the site in Safari (iOS), tap **Share**, then **Add to Home Screen**
-
-For install prompts and offline caching to work correctly, deploy over HTTPS.
-
-## Deploy to Netlify
-
-This repo includes `netlify.toml` with the Netlify build settings for the Next.js app:
+After setting `DATABASE_URL`, run:
 
 ```bash
-npm run build
+npm run db:migrate
 ```
 
-Netlify should use `.next` as the publish directory. The project also includes `.nvmrc`
-to build with Node.js 22.
+The SQL files in `sql/` are kept as reference for earlier schema changes.
 
-Before deploying, add these environment variables in Netlify:
+## Deployment
+
+This repo includes `netlify.toml` and `.nvmrc` for Netlify:
+
+- Build command: `npm run build`
+- Publish directory: `.next`
+- Node version: `22`
+
+Set these variables in Netlify before deploying:
 
 - `GEMINI_API_KEY`
 - `DATABASE_URL`
 - `JWT_SECRET`
+- Optional model variables from `.env.example`
 
-Optional model and fallback variables are listed in `.env.example`. Keep `.env.local`
-only for local development; Netlify does not read it during hosted builds.
+Use a Git-connected Netlify deploy or the Netlify Next.js runtime. Do not deploy this app as a plain static drag-and-drop upload, because the Next.js API routes need the generated Netlify server function.
 
-## Core Paths
+If `/api/auth` returns a 404 HTML page or the login form shows `Unexpected token '<'`, the active Netlify deploy is missing the Next.js server function. Redeploy from source with the Next.js runtime, or restore a deploy that includes `___netlify-server-handler`.
+
+## Project Structure
 
 - `src/app/page.tsx` - Home screen
-- `src/app/scan/page.tsx` - Camera scan and AI processing flow
-- `src/app/api/analyze/route.ts` - Gemini vision analysis endpoint
--- `src/app/api/pantry/route.ts` - Pantry read/write endpoint (Drizzle + Neon Postgres)
+- `src/app/login/page.tsx` - Login and registration UI
+- `src/app/scan/page.tsx` - Camera scan and AI analysis flow
+- `src/app/inventory/page.tsx` - Pantry inventory
+- `src/app/recipes/page.tsx` - Recipe generation and browsing
+- `src/app/api/auth/route.ts` - Auth endpoint
+- `src/app/api/analyze/route.ts` - Gemini vision endpoint
+- `src/app/api/pantry/route.ts` - Pantry read/write endpoint
+- `components/BottomNav.tsx` - Mobile bottom navigation
+- `components/PwaRegister.tsx` - Service worker registration
+
+## PWA
+
+The app includes:
+
+- Manifest from `src/app/manifest.ts`
+- App icons from `src/app/icon.tsx` and `src/app/apple-icon.tsx`
+- Service worker from `public/sw.js`
+
+Deploy over HTTPS for install prompts and offline caching to work correctly.

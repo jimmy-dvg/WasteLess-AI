@@ -1,5 +1,5 @@
-const CACHE_VERSION = "wasteless-v1";
-const APP_SHELL = ["/", "/scan", "/recipes"];
+const CACHE_VERSION = "wasteless-v2";
+const APP_SHELL = ["/"];
 
 self.addEventListener("install", (event) => {
 	event.waitUntil(
@@ -28,6 +28,29 @@ self.addEventListener("fetch", (event) => {
 
 	const requestUrl = new URL(event.request.url);
 	if (requestUrl.origin !== self.location.origin) {
+		return;
+	}
+
+	if (
+		requestUrl.pathname.startsWith("/api/") ||
+		requestUrl.pathname.startsWith("/_next/")
+	) {
+		return;
+	}
+
+	if (event.request.mode === "navigate") {
+		event.respondWith(
+			fetch(event.request)
+				.then((networkResponse) => {
+					if (networkResponse && networkResponse.status === 200) {
+						const responseToCache = networkResponse.clone();
+						caches.open(CACHE_VERSION).then((cache) => cache.put(event.request, responseToCache));
+					}
+
+					return networkResponse;
+				})
+				.catch(() => caches.match(event.request).then((cachedResponse) => cachedResponse || caches.match("/") || Response.error()))
+		);
 		return;
 	}
 
